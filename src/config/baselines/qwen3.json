@@ -1,0 +1,31 @@
+{
+    "algorithm": "baselines",
+    "device": "cuda",
+    "llm_models": [
+        "Qwen/Qwen3-4B-Instruct-2507"
+    ],
+    "datasets": [
+        {
+            "name": "coqa",
+            "subset": null
+        },
+        {
+            "name": "truthful_qa",
+            "subset": "generation"
+        },
+        {
+            "name": "trivia_qa",
+            "subset": "rc.nocontext"
+        },
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": null,
+            "split": "test"
+        }
+    ],
+    "max_train_samples": 250,
+    "epochs": 50,
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    "note": "deepseek-ai/deepseek-llm-7b-base"
+}

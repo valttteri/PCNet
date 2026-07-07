@@ -1,0 +1,29 @@
+{
+    "algorithm": "PCNet_Guardrail",
+    "device": "cuda",
+    "llm_models": ["meta-llama/Llama-3.2-1B-Instruct"],
+    "datasets": [
+        {
+            "name": "coqa",
+            "subset": null
+        },
+        {
+            "name": "truthful_qa",
+            "subset": "generation"
+        },
+        {
+            "name": "trivia_qa",
+            "subset": "rc.nocontext"
+        },
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": null,
+            "split": "test"
+        }
+    ],
+    "max_samples": 300,
+    "z_score_threshold": 3.0,
+    "gradient_energy_threshold": 0.10,
+    "max_new_tokens": 80,
+    "optimal_threshold": 0.50
+}

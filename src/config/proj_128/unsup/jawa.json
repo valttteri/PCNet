@@ -1,0 +1,28 @@
+{
+    "algorithm": "PCNet_Guardrail_proj_128",
+    "device": "cpu",
+    "pc_in_channels": 128,
+    "unsupervised": true,
+    "llm_models": [
+        "Qwen/Qwen2.5-0.5B-Instruct",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        "meta-llama/Llama-3.2-1B-Instruct",
+        "Qwen/Qwen3-4B",
+        "mistralai/Mistral-7B-Instruct-v0.3",
+        "deepseek-ai/deepseek-llm-7b-base"
+    ],
+    "datasets": [
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": null,
+            "split": "test"
+        }
+    ],
+    "max_train_samples": 500,
+    "epochs": 50,
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    "pc_weights_path": "checkpoints/PCNet_Guardrail/pcnet_best.pth",
+    "mlp_weights_path": "checkpoints/PCNet_Guardrail/mlp_probe_best.pth",
+    "note": "deepseek-ai/deepseek-llm-7b-base"
+}

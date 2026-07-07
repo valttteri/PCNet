@@ -1,0 +1,19 @@
+{
+    "algorithm": "PCNet_Guardrail",
+    "llm_models": ["mistralai/Mistral-7B-Instruct-v0.1"], 
+    "pc_in_channels": 128,
+    "device": "cpu", 
+    
+    "hf_dataset_name": "pminervini/HaluEval", 
+    "hf_subset_name": "qa",
+    
+    "max_train_samples": 10,
+    "epochs": 3,
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    
+    "max_samples": 5,
+    
+    "weights_path": "checkpoints/AttentionalPCNet_Guardrail/pcnet_best.pth",
+    "mlp_weights_path": "checkpoints/AttentionalPCNet_Guardrail/mlp_probe_best.pth"
+}

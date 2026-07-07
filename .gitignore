@@ -1,0 +1,11 @@
+.venv/
+checkpoints/*.pth
+.env
+__pycache__/
+*.pyc
+paper_logs
+logs
+rag_ablation_logs
+data_size_ablation_logs
+venv
+checkpoints

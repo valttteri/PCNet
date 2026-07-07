@@ -1,0 +1,9 @@
+{
+    "algorithm": "PCNet_Guardrail",
+    "device": "cuda",
+    "llm_models": ["mistralai/Mistral-7B-Instruct-v0.3"],
+    "max_samples": 300,
+    "z_score_threshold": 3.0,
+    "gradient_energy_threshold": 0.10,
+    "optimal_threshold": 0.50
+}

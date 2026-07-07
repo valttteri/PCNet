@@ -1,0 +1,44 @@
+{
+    "algorithm": "PCNet_Guardrail_proj_64",
+    "device": "cuda",
+    "pc_in_channels": 64,
+    "unsupervised": true,
+    "llm_models": [
+        "deepseek-ai/deepseek-llm-7b-chat"
+    ],
+    "datasets": [
+        {
+            "name": "pminervini/HaluEval",
+            "subset": "qa",
+            "split": "data"
+        },
+        {
+            "name": "coqa",
+            "subset": null
+        },
+        {
+            "name": "truthful_qa",
+            "subset": "generation"
+        },
+        {
+            "name": "trivia_qa",
+            "subset": "rc.nocontext"
+        },
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": null,
+            "split": "test"
+        },
+        {
+            "name": "nq_open",
+            "split": "train"
+        }
+    ],
+    "max_train_samples": 500,
+    "epochs": 50,
+    "batch_size": 4,
+    "learning_rate": 0.001,
+    "pc_weights_path": "checkpoints/PCNet_Guardrail/pcnet_best.pth",
+    "mlp_weights_path": "checkpoints/PCNet_Guardrail/mlp_probe_best.pth",
+    "note": "deepseek-ai/deepseek-llm-7b-base"
+}
