@@ -68,4 +68,4 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
     echo "All jobs submitted."
 else
     echo "Submission aborted."
-fi
+fi  

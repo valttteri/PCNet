@@ -92,8 +92,12 @@ def main():
             
             # Check if test logs already exist to skip run
             log_algo_folder = f"unsup_{algorithm}" if is_unsup else algorithm
-            log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
+            #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
+            log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
+
+            print("[main.py/main()] Metrics path:", metrics_path)
+            print("Path exists", os.path.exists(metrics_path))
             
             if os.path.exists(metrics_path):
                 print(f"  ⏭️ Test logs already exist at {metrics_path}. Skipping evaluation!")
