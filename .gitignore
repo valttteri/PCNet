@@ -9,3 +9,6 @@ rag_ablation_logs
 data_size_ablation_logs
 venv
 checkpoints
+idle.py
+setenv.sh
+test.py

@@ -43,13 +43,13 @@ def main():
 
     master_metrics = {}
 
-    print(f"🚀 Starting Token & SOTA Baselines Benchmark on {device.upper()}")
+    print(f"Starting Token & SOTA Baselines Benchmark on {device.upper()}")
     print(f"Models: {len(llm_models)} | Datasets: {len(datasets)}")
     print("=" * 60)
 
     for llm_name in llm_models:
         print(f"\n\n{'='*60}")
-        print(f"🤖 LOADING FOUNDATION MODEL: {llm_name}")
+        print(f"LOADING FOUNDATION MODEL: {llm_name}")
         print(f"{'='*60}")
         
         master_metrics[llm_name] = {}
@@ -72,7 +72,7 @@ def main():
             ds_split = ds_info.get("split", "data")
             ds_key = f"{ds_name}_{ds_subset}" if ds_subset else ds_name
             
-            print(f"\n📊 EVALUATING ON DATASET: {ds_name} (Subset: {ds_subset})")
+            print(f"\nEVALUATING ON DATASET: {ds_name} (Subset: {ds_subset})")
             
             importlib.reload(hf_dataloader)
             UnifiedDataLoader = hf_dataloader.UnifiedDataLoader
@@ -82,9 +82,10 @@ def main():
             
             log_dir = os.path.join("logs", "baselines", safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
+            print("[run_baselines.py/main()] Metrics path:", metrics_path)
             
             if os.path.exists(metrics_path):
-                print(f"  ⏭️ Test logs already exist at {metrics_path}. Skipping evaluation!")
+                print(f"Test logs already exist at {metrics_path}. Skipping evaluation!")
                 with open(metrics_path, "r") as f:
                     master_metrics[llm_name][ds_key] = json.load(f)
                 continue 
@@ -98,13 +99,13 @@ def main():
             )
             
             if not dataset:
-                print("  ⚠️ Dataset loading failed or empty. Skipping...")
+                print("Dataset loading failed or empty. Skipping...")
                 continue
             
             experiment = BaselineDetectionExperiment(llm=llm, tokenizer=tokenizer, device=device)
             
             # Fetch Wild Mixture for HaloScope Fit
-            print("  🧩 Fetching RAW 'Wild Mixture' Embeddings for HaloScope Pipeline...")
+            print("Fetching RAW 'Wild Mixture' Embeddings for HaloScope Pipeline...")
             train_true, train_fake = UnifiedDataLoader.load_train_data(
                 dataset_name=ds_name,
                 subset=ds_subset,
@@ -138,7 +139,7 @@ def main():
                     n_sep = config.get("sep_train_samples", min(60, len(wild_mixture)))
                     sep_texts = wild_mixture[:n_sep]
                     sep_embs = raw_train_embeddings[:n_sep]
-                    print(f"  🧪 Fitting SEP on {n_sep} samples (computing semantic-entropy targets)...")
+                    print(f"Fitting SEP on {n_sep} samples (computing semantic-entropy targets)...")
                     se_targets = experiment.compute_semantic_entropy_for_fit(
                         sep_texts,
                         num_samples=config.get("sep_se_samples", 5),
@@ -161,7 +162,7 @@ def main():
             if 'experiment' in locals(): del experiment
             flush_memory()
             
-        print(f"\n🧹 Cleaning up {llm_name} Foundation Model from memory...")
+        print(f"\nCleaning up {llm_name} Foundation Model from memory...")
         del llm
         del tokenizer
         flush_memory()
@@ -172,7 +173,7 @@ def main():
     with open(summary_path, "w") as f:
         json.dump(master_metrics, f, indent=4)
         
-    print(f"\n🎉 ALL BASELINE BENCHMARKS COMPLETE. Summary saved to {summary_path}")
+    print(f"\nALL BASELINE BENCHMARKS COMPLETE. Summary saved to {summary_path}")
 
 if __name__ == "__main__":
     main()
