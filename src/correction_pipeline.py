@@ -26,6 +26,9 @@ import gc
 import warnings
 warnings.filterwarnings("ignore")
 
+from logger import Logger
+logs = Logger()
+
 # Optional text quality dependencies
 try:
     from rouge_score import rouge_scorer as _rouge_module
@@ -742,6 +745,7 @@ class ExperimentalPipeline:
         self.iti_dir_h     = None
         self.load_config()
         self.summary_rows  = []   # one row per (llm, dataset, method) for final CSV
+        self.run_number = 1
 
     def load_config(self):
         with open(self.config_path) as f:
@@ -820,6 +824,7 @@ class ExperimentalPipeline:
     # ------------------------------------------------------------------
 
     def execute(self):
+        logs.info(msg="Started executing correction_pipeline.py/execute()")
         print(f"Correction Pipeline (Dual-Mode) | config: {self.config_path}")
         print(f"Threshold: {self.optimal_threshold} | Samples: {self.max_samples}\n")
 
@@ -833,11 +838,11 @@ class ExperimentalPipeline:
             # # "MIC (tau=20)",
             # # "MIC (tau=10)",
             "ITI",
-            "DoLa",
+            ## Uncomment "DoLa",
             # # "TruthX",
             # # "PC-Guided_Contrastive",
             # # "Soft_Wiener_Imputation",
-            "PC_Constrained_Decoding",
+            ## Uncomment "PC_Constrained_Decoding",
             # # "PC_Adaptive_Logit_Interpolation",
             # "PC_Vocabulary_Banishment",
             # # "PC_Score_Vocab_Banishment",
@@ -845,11 +850,11 @@ class ExperimentalPipeline:
             # # "PC_Anti-Score_Contrast",
             # "PC_Langevin_Tweedie",
             # # "PC_Onset_Correction",
-            "ICD",
-            "SADI",
+            ## Uncomment "ICD",
+            ## Uncomment "SADI",
             # # "ACT",
             "AdaSteer",
-            "HalluCana",
+            ## Uncomment "HalluCana",
             # # "PC_Langevin_Banishment",
             # "PC_DPA",
         ]
@@ -860,6 +865,22 @@ class ExperimentalPipeline:
             ablation_entries.append((m, "Gated"))
             ablation_entries.append((m, "Blind"))
 
+        base_log_dir = "correction_pipeline_logs"
+
+        # Create a directory for the current run
+        if os.path.exists(base_log_dir):
+            previous_logs = os.listdir(base_log_dir)
+
+            if len(previous_logs) > 0:
+                # Split the logs names into ["run","x"], and exclude files not starting with "run"
+                run_nums = [int(log.split("_")[-1]) for log in previous_logs if log.startswith("run")]                        
+                self.run_number = max(run_nums) + 1
+                print(self.run_number)
+        
+        base_log_dir = os.path.join(base_log_dir, f"run_{self.run_number}") 
+        os.makedirs(base_log_dir, exist_ok=True)
+
+        logs.info(msg="Iterating over LLMs")
         for llm_name in self.llm_models:
             print(f"\n{'='*60}\nLLM: {llm_name}\n{'='*60}")
             guardrail = LLM_PC_Guardrail(
@@ -868,6 +889,10 @@ class ExperimentalPipeline:
             llm       = guardrail.llm
             tokenizer = guardrail.tokenizer
 
+            safe_llm = llm_name.replace("/", "_")
+            base_log_dir = os.path.join(base_log_dir, safe_llm)
+
+            logs.info(msg=f"Iterating over datasets for model {llm_name}")
             for ds_info in self.datasets:
                 ds_name   = ds_info["name"]
                 ds_subset = ds_info.get("subset", None)
@@ -881,15 +906,18 @@ class ExperimentalPipeline:
                     return_refs=True,
                 )
                 if not dataset:
-                    print(f"  Empty dataset for {ds_display}, skipping.")
+                    print(f"Empty dataset for {ds_display}, skipping.")
                     continue
 
-                safe_llm = llm_name.replace("/", "_")
                 safe_ds  = ds_name.replace("/", "_")
                 if ds_subset:
                     safe_ds = f"{safe_ds}_{ds_subset}"
-                base_log_dir = os.path.join("2_last_correction_pipeline_logs", str(self.seed), safe_llm, safe_ds)
+
+                # Dir name becomes correction_pipeline_logs/run_x/llm_name/ds_name
+                base_log_dir = os.path.join(base_log_dir, safe_ds)
+
                 os.makedirs(base_log_dir, exist_ok=True)
+                logs.info(f"Created a dir for dataset: {base_log_dir}")
 
                 # Load trained PCNet 
                 pc_path = os.path.join(
@@ -901,12 +929,13 @@ class ExperimentalPipeline:
                     ckpt = torch.load(pc_path, map_location=self.device, weights_only=False)
                     guardrail.pc_prior  = ckpt["pc_prior"].to(self.device)
                     guardrail.projector = ckpt["projector"].to(self.device)
-                    print(f"  Loaded PCNet from {pc_path}")
+                    print(f"Loaded PCNet from {pc_path}")
                 else:
-                    print(f"  No PCNet checkpoint at {pc_path}. Using untrained model.")
+                    print(f"No PCNet checkpoint at {pc_path}. Using untrained model.")
+                    return
 
                 guardrail.eval()
-                D          = 128
+                D = 128
                 leaf_means = _get_leaf_means(guardrail, D)
 
                 # ------------------------------------------------
@@ -916,6 +945,7 @@ class ExperimentalPipeline:
                 phase1 = []
                 pre_embs_all = []   # (idx, np.array) for PCA
 
+                logs.info("Row 927: Iterating over sample_tuples")
                 for idx, sample_tuple in enumerate(tqdm(dataset, desc="  Phase 1")):
                     text, gt_label, ref_answer = sample_tuple
                     prompt = text.split("\nAnswer:")[0] + "\nAnswer:"
@@ -926,6 +956,7 @@ class ExperimentalPipeline:
                         z_pre = guardrail._get_llm_embeddings([prompt + " " + text_pre])
                         
                     # CRITICAL FIX: Use Tractable Dropout Inference (TDI) to match experiment.py
+
                     log_prob = guardrail(prompt + " " + text_pre, mpe_training=False, n_samples=20)
                     nll = -log_prob.mean().item()
 
@@ -946,9 +977,11 @@ class ExperimentalPipeline:
                     })
 
                 # --- Calibrate threshold on observed NLL distribution ---
-                all_nlls   = np.array([r["nll_pre"] for r in phase1])
-                gt_labels  = np.array([r["gt_label"] for r in phase1])
+                all_nlls = np.array([r["nll_pre"] for r in phase1])
+                gt_labels = np.array([r["gt_label"] for r in phase1])
                 if gt_labels.sum() > 0 and (gt_labels == 0).sum() > 0:
+
+                    logs.info("Calculating precision-recall -curve")
                     prec_arr, rec_arr, thr_arr = precision_recall_curve(gt_labels, all_nlls)
                     f1_arr = 2 * prec_arr[:-1] * rec_arr[:-1] / (prec_arr[:-1] + rec_arr[:-1] + 1e-8)
                     calibrated_threshold = float(thr_arr[np.argmax(f1_arr)])
@@ -961,8 +994,10 @@ class ExperimentalPipeline:
                     print(f"  WARNING: Cannot calibrate — using config threshold {self.optimal_threshold}")
 
                 anomalous = [r for r in phase1 if r["is_anomalous"]]
+                logs.info(f"Example anomalous: {anomalous[0]}")
 
                 # Pre-correction confusion matrix (shared across all methods)
+                logs.info("Row 979: Calling _confusion_counts()")
                 TP, FP, TN, FN = _confusion_counts(phase1, self.optimal_threshold)
                 pre_f1, pre_prec, pre_rec = _f1(TP, FP, FN)
                 print(f"  Pre-correction — TP:{TP} FP:{FP} TN:{TN} FN:{FN} | F1:{pre_f1:.3f}")
@@ -979,9 +1014,10 @@ class ExperimentalPipeline:
                 self.iti_dir_h        = None
                 self.iti_head_specs   = None
                 self.adasteer_kwargs  = None
-
+                
                 if anomalous:
                     global_grads = torch.zeros(llm.config.hidden_size, device=self.device)
+                    logs.info("Phase 2: Iterating over anomalous")
                     for r in tqdm(anomalous, desc="  Gradients"):
                         out_states = llm(**r["inputs_tok"], output_hidden_states=True)
                         h_last = out_states.hidden_states[-1][:, -1:, :].detach().requires_grad_(True)
@@ -991,6 +1027,7 @@ class ExperimentalPipeline:
                         grad_h = torch.autograd.grad(nll_val, h_last)[0]
                         global_grads += grad_h.abs().squeeze(0).squeeze(0)
 
+                    logs.info(f"nll_val={nll_val}")
                     # Energy threshold
                     sorted_g, sorted_idx = torch.sort(global_grads, descending=True)
                     cum_e    = torch.cumsum(sorted_g, dim=0) / (sorted_g.sum() + 1e-9)
@@ -1022,6 +1059,7 @@ class ExperimentalPipeline:
                         (r["inputs_tok"], int(r["gt_label"])) for r in phase1
                     ]
                     try:
+                        logs.info("Row 1041: Paper-faithful ITI")
                         self.iti_head_specs = correction_baselines.calibrate_per_head_iti(
                             llm, samples_iter, n_top_heads=48,
                         )
@@ -1036,6 +1074,7 @@ class ExperimentalPipeline:
 
                     # AdaSteer: two-direction linear λ + logistic-regression fit.
                     try:
+                        logs.info("Row 1056: AdaSteer")
                         norm_name_calib = correction_pcnet._final_norm_name(llm)
                         self.adasteer_kwargs = correction_baselines.calibrate_adasteer(
                             llm, samples_iter, layer_name=norm_name_calib,
@@ -1173,8 +1212,9 @@ class ExperimentalPipeline:
                             continue
 
                         if flagged:
-                            # Sample is flagged: run correction ONCE, share for both modes.
+                            # Sample is flagged (=is_anomalous): run correction ONCE, share for both modes.
                             # PPL of the corrected text is also computed once and reused.
+                            logs.info("Row 1197: Flagged=True, calling _apply_correction()")
                             out = _apply_correction(
                                 base_method, guardrail, inputs_tok, args_dict,
                                 pad_id, norm_name, truthx_model
@@ -1221,6 +1261,7 @@ class ExperimentalPipeline:
                 all_method_metrics = []
 
                 for base, mode in ablation_entries:
+                    logs.info(f"Row 1243: base, mode: {base}, {mode} in ablation entries")
                     display = base if mode is None else f"{base} [{mode}]"
 
                     if display in done_methods:
@@ -1233,7 +1274,8 @@ class ExperimentalPipeline:
                         continue
 
                     samples = method_samples[display]
-
+                    
+                    logs.info("Row 1257: Calling _post_confusion")
                     tf, tf_fail, fp_rec, fp_cor = _post_confusion(samples, self.optimal_threshold)
                     attempted  = tf + tf_fail + fp_rec + fp_cor
                     fixed      = tf + fp_rec
@@ -1298,8 +1340,11 @@ class ExperimentalPipeline:
                     # Save logs
                     safe_m = display.replace(" ", "_").replace("(", "").replace(")", "").replace("=", "").replace("/", "_").replace("[", "").replace("]", "")
                     method_dir = os.path.join(base_log_dir, safe_m)
+
+                    logs.info("Row 1322: Calling _save_method_logs()")
                     _save_method_logs(display, samples, metrics, method_dir)
 
+                    logs.info("Row 1325: Calling _plot_per_method()")
                     # Per-method plots
                     _plot_per_method(
                         display, samples, base_log_dir, self.optimal_threshold,
@@ -1329,11 +1374,13 @@ class ExperimentalPipeline:
                 print(f"  Comparison saved to {comp_dir}/")
 
                 flush_memory()
+                logs.info(f"Iteration completed for {ds_info}")
 
             print(f"\n  Cleaning up {llm_name}...")
             del guardrail
             flush_memory()
 
+        logs.info("Row 1360: (very end) Calling self._export_global_report()")
         self._export_global_report()
 
     # ------------------------------------------------------------------
@@ -1344,9 +1391,10 @@ class ExperimentalPipeline:
         if not self.summary_rows:
             return
         df = pd.DataFrame(self.summary_rows)
-        os.makedirs("2_last_correction_pipeline_logs", exist_ok=True)
-        ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out = f"2_last_correction_pipeline_logs/global_summary_{ts}.csv"
+        df["seed"] = [self.seed] * df.shape[0]
+        os.makedirs("correction_pipeline_logs", exist_ok=True)
+        ts  = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        out = f"correction_pipeline_logs/global_summary_run_{self.run_number}_{ts}.csv"
         df.to_csv(out, index=False)
 
         print(f"\n{'='*60}")
@@ -1372,7 +1420,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Dual-Mode Correction Pipeline: PCNet-Gated vs Blind for all methods"
     )
-    parser.add_argument("config", help="Path to evaluation JSON config")
+    parser.add_argument("--config", help="Path to evaluation JSON config")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
     ExperimentalPipeline(args.config, args.seed).execute()

@@ -104,7 +104,7 @@ python src/main.py src/config/sup/llama3.2_1b.json 42
 ### 3. Run the gating + correction pipeline
 
 ```bash
-python src/correction_pipeline.py src/config/correction/llama3.2_1b.json 42
+python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 42
 ```
 
 This runs all correction methods (Vanilla, DoLa, ITI, TruthX, Vocab Banishment, Z-Score, TAC, Contrastive Decoding) in both **gated** and **blind** (always-on) modes.
