@@ -7,8 +7,10 @@ paper_logs
 logs
 rag_ablation_logs
 data_size_ablation_logs
+correction_pipeline_logs
 venv
 checkpoints
 idle.py
 setenv.sh
 test.py
+*.out
