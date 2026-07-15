@@ -838,7 +838,7 @@ class ExperimentalPipeline:
             # # "MIC (tau=20)",
             # # "MIC (tau=10)",
             "ITI",
-            ## Uncomment "DoLa",
+            "DoLa",
             # # "TruthX",
             # # "PC-Guided_Contrastive",
             # # "Soft_Wiener_Imputation",
@@ -850,11 +850,11 @@ class ExperimentalPipeline:
             # # "PC_Anti-Score_Contrast",
             # "PC_Langevin_Tweedie",
             # # "PC_Onset_Correction",
-            ## Uncomment "ICD",
-            ## Uncomment "SADI",
-            # # "ACT",
+            "ICD",
+            "SADI",
+            #"ACT",
             "AdaSteer",
-            ## Uncomment "HalluCana",
+            #"HalluCana",
             # # "PC_Langevin_Banishment",
             # "PC_DPA",
         ]
@@ -875,8 +875,9 @@ class ExperimentalPipeline:
                 # Split the logs names into ["run","x"], and exclude files not starting with "run"
                 run_nums = [int(log.split("_")[-1]) for log in previous_logs if log.startswith("run")]                        
                 self.run_number = max(run_nums) + 1
-                print(self.run_number)
+                #print(self.run_number)
         
+        # Base_log_dir = correction_pipeline_logs/run_x
         base_log_dir = os.path.join(base_log_dir, f"run_{self.run_number}") 
         os.makedirs(base_log_dir, exist_ok=True)
 
@@ -890,6 +891,9 @@ class ExperimentalPipeline:
             tokenizer = guardrail.tokenizer
 
             safe_llm = llm_name.replace("/", "_")
+
+            # Base_log_dir = correction_pipeline_logs/run_x/llm_name
+            # Note that the directory structure breaks if number of LLMs > 1
             base_log_dir = os.path.join(base_log_dir, safe_llm)
 
             logs.info(msg=f"Iterating over datasets for model {llm_name}")
@@ -914,10 +918,10 @@ class ExperimentalPipeline:
                     safe_ds = f"{safe_ds}_{ds_subset}"
 
                 # Dir name becomes correction_pipeline_logs/run_x/llm_name/ds_name
-                base_log_dir = os.path.join(base_log_dir, safe_ds)
+                ds_log_dir = os.path.join(base_log_dir, safe_ds)
 
-                os.makedirs(base_log_dir, exist_ok=True)
-                logs.info(f"Created a dir for dataset: {base_log_dir}")
+                os.makedirs(ds_log_dir, exist_ok=True)
+                logs.info(f"Created a dir for dataset: {ds_log_dir}")
 
                 # Load trained PCNet 
                 pc_path = os.path.join(
@@ -1111,7 +1115,7 @@ class ExperimentalPipeline:
                 done_methods = set()
                 for _base, _mode in ablation_entries:
                     _display = _base if _mode is None else f"{_base} [{_mode}]"
-                    _mdir = os.path.join(base_log_dir, _safe_method_name(_display))
+                    _mdir = os.path.join(ds_log_dir, _safe_method_name(_display))
                     if os.path.exists(os.path.join(_mdir, "metrics.json")):
                         done_methods.add(_display)
                         print(f"  [SKIP] {_display} — metrics.json found, will load from cache.")
@@ -1214,7 +1218,6 @@ class ExperimentalPipeline:
                         if flagged:
                             # Sample is flagged (=is_anomalous): run correction ONCE, share for both modes.
                             # PPL of the corrected text is also computed once and reused.
-                            logs.info("Row 1197: Flagged=True, calling _apply_correction()")
                             out = _apply_correction(
                                 base_method, guardrail, inputs_tok, args_dict,
                                 pad_id, norm_name, truthx_model
@@ -1265,7 +1268,7 @@ class ExperimentalPipeline:
                     display = base if mode is None else f"{base} [{mode}]"
 
                     if display in done_methods:
-                        method_dir = os.path.join(base_log_dir, _safe_method_name(display))
+                        method_dir = os.path.join(ds_log_dir, _safe_method_name(display))
                         with open(os.path.join(method_dir, "metrics.json")) as _f:
                             metrics = json.load(_f)
                         all_method_metrics.append(metrics)
@@ -1339,7 +1342,7 @@ class ExperimentalPipeline:
 
                     # Save logs
                     safe_m = display.replace(" ", "_").replace("(", "").replace(")", "").replace("=", "").replace("/", "_").replace("[", "").replace("]", "")
-                    method_dir = os.path.join(base_log_dir, safe_m)
+                    method_dir = os.path.join(ds_log_dir, safe_m)
 
                     logs.info("Row 1322: Calling _save_method_logs()")
                     _save_method_logs(display, samples, metrics, method_dir)
@@ -1347,7 +1350,7 @@ class ExperimentalPipeline:
                     logs.info("Row 1325: Calling _plot_per_method()")
                     # Per-method plots
                     _plot_per_method(
-                        display, samples, base_log_dir, self.optimal_threshold,
+                        display, samples, ds_log_dir, self.optimal_threshold,
                         pre_embs_all,
                         method_post_embs.get(display, [])
                     )
@@ -1363,7 +1366,7 @@ class ExperimentalPipeline:
                 # PHASE 5: Cross-method comparison plots
                 # ------------------------------------------------
                 print(f"\n  PHASE 5: Cross-method comparison plots...")
-                comp_dir = os.path.join(base_log_dir, "comparison")
+                comp_dir = os.path.join(ds_log_dir, "comparison")
                 _plot_cross_method_comparison(all_method_metrics, comp_dir)
                 _plot_gating_advantage(all_method_metrics, base_methods, comp_dir)
 
@@ -1371,12 +1374,12 @@ class ExperimentalPipeline:
                 pd.DataFrame(all_method_metrics).to_csv(
                     os.path.join(comp_dir, "method_summary.csv"), index=False
                 )
-                print(f"  Comparison saved to {comp_dir}/")
+                print(f"Comparison saved to {comp_dir}/")
 
                 flush_memory()
                 logs.info(f"Iteration completed for {ds_info}")
 
-            print(f"\n  Cleaning up {llm_name}...")
+            print(f"\nCleaning up {llm_name}...")
             del guardrail
             flush_memory()
 
