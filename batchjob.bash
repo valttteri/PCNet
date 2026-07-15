@@ -2,7 +2,7 @@
 #SBATCH --job-name=veahola
 #SBATCH --account=project_2013898
 #SBATCH --partition=gpumedium
-#SBATCH --time=05:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1 --cpus-per-task=72  # The product should be 72 if requesting 1 GPU per node
 #SBATCH --gres=gpu:gh200:1  # Corresponds to 1 GPU per node
@@ -16,4 +16,4 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=spread
 
 # Run the program
-srun python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 42
+srun python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 44
