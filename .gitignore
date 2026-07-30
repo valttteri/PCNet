@@ -8,6 +8,8 @@ logs
 rag_ablation_logs
 data_size_ablation_logs
 correction_pipeline_logs
+comparisons
+evaluation_reports
 venv
 checkpoints
 idle.py
