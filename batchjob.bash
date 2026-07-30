@@ -16,4 +16,6 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=spread
 
 # Run the program
-srun python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 44
+#srun python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 44
+#srun python src/benchmarking.py --log_dir paper_logs/correction
+srun python compare_dataframes.py

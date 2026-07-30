@@ -12,7 +12,8 @@ class UnifiedDataLoader:
         )
 
         # Combine and label: 0 for Factual, 1 for Hallucinated
-        if return_refs:
+        # return_refs = True by default
+        if return_refs: 
             combined = [(text, 0, ref) for text, ref in zip(factuals, refs_f)] + \
                        [(text, 1, ref) for text, ref in zip(hallucinations, refs_h)]
         else:

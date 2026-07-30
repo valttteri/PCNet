@@ -72,10 +72,10 @@ from correction_pcnet import _compute_delta_h, _get_leaf_means
 # ============================================================
 
 def _confusion_counts(samples, threshold):
-    TP = sum(1 for s in samples if s["gt_label"] == 1 and s["nll_pre"] >= threshold)
-    FP = sum(1 for s in samples if s["gt_label"] == 0 and s["nll_pre"] >= threshold)
-    TN = sum(1 for s in samples if s["gt_label"] == 0 and s["nll_pre"] <  threshold)
-    FN = sum(1 for s in samples if s["gt_label"] == 1 and s["nll_pre"] <  threshold)
+    TP = sum(1 for s in samples if s["gt_label"] == 1 and s["nll_pre"] >= threshold) # Hallucinated, flagged as hallucinated
+    FP = sum(1 for s in samples if s["gt_label"] == 0 and s["nll_pre"] >= threshold) # Truthful, flagged as hallucinated
+    TN = sum(1 for s in samples if s["gt_label"] == 0 and s["nll_pre"] <  threshold) # Truthful, flagged as truthful
+    FN = sum(1 for s in samples if s["gt_label"] == 1 and s["nll_pre"] <  threshold) # Hallucinated, flagged as truthful
     return TP, FP, TN, FN
 
 
@@ -842,7 +842,7 @@ class ExperimentalPipeline:
             # # "TruthX",
             # # "PC-Guided_Contrastive",
             # # "Soft_Wiener_Imputation",
-            ## Uncomment "PC_Constrained_Decoding",
+            "PC_Constrained_Decoding",
             # # "PC_Adaptive_Logit_Interpolation",
             # "PC_Vocabulary_Banishment",
             # # "PC_Score_Vocab_Banishment",
@@ -904,11 +904,14 @@ class ExperimentalPipeline:
                 ds_display = f"{ds_name} ({ds_subset})" if ds_subset else ds_name
 
                 importlib.reload(hf_dataloader)
+
+                # hf_dataloader sets the gt_labels
                 dataset = hf_dataloader.UnifiedDataLoader.load_test_data(
                     ds_name, subset=ds_subset, split=ds_split,
                     max_samples=self.max_samples, seed=self.seed,
                     return_refs=True,
                 )
+                
                 if not dataset:
                     print(f"Empty dataset for {ds_display}, skipping.")
                     continue
@@ -949,7 +952,7 @@ class ExperimentalPipeline:
                 phase1 = []
                 pre_embs_all = []   # (idx, np.array) for PCA
 
-                logs.info("Row 927: Iterating over sample_tuples")
+                logs.info("Row 927: Iterating over QA-pairs")
                 for idx, sample_tuple in enumerate(tqdm(dataset, desc="  Phase 1")):
                     text, gt_label, ref_answer = sample_tuple
                     prompt = text.split("\nAnswer:")[0] + "\nAnswer:"
