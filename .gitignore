@@ -16,3 +16,5 @@ idle.py
 setenv.sh
 test.py
 *.out
+all_logs
+datasets

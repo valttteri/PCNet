@@ -112,15 +112,53 @@ def average_of_dataframes(paper_mode: bool=False, dataset: str=None):
     df_avg.to_csv(f"comparisons/paper_correction_avg_{dataset}_1.csv")
     #print(tabulate(df_avg_numeric, headers="keys", tablefmt="github"))
 
+def average_of_dataframes_mc(**kwargs):
+    """
+    Compute average of datafames produced by correction_pipeline_mc
+    """
+    df1 = pd.read_csv(kwargs["df1_name"], header=0, index_col=0)
+    df2 = pd.read_csv(kwargs["df2_name"], header=0, index_col=0)
+    df3 = pd.read_csv(kwargs["df3_name"], header=0, index_col=0)
+
+    numeric_cols = df1.select_dtypes(include="number").columns
+    non_numeric_cols = df1.select_dtypes(exclude="number").columns
+
+    # Average numeric columns, cell-wise
+    df_avg_numeric = pd.DataFrame(
+       (df1[numeric_cols].values + df2[numeric_cols].values + df3[numeric_cols].values) / 3,
+       index=df1.index,
+       columns=numeric_cols
+    )
+
+    # Reattach non-numeric columns
+    df_avg = pd.concat([df2[non_numeric_cols], df_avg_numeric], axis=1)
+
+    # Restore original column order
+    df_avg = df_avg[df2.columns]
+
+    try:
+        df_avg.to_csv(f"comparisons/paper_correction_mc_1.csv")
+        print("Saved results to a csv file")
+    except Exception as e:
+        print(f"Saving results failed:", e)
+    
+def remove_extra_index():
+    df = pd.read_csv("datasets/truthfulqa_paper_gen.csv", header=0, index_col=0)
+    df.to_csv("datasets/truthfulqa_paper_gen.csv", index=False)
+
 if __name__ == "__main__":
     #main(
     #    model_name="meta-llama_Llama-3.2-1B-Instruct",
     #    dataset_name="coqa"
     #)
-    datasets = os.listdir("paper_logs/correction/44/meta-llama_Llama-3.2-1B-Instruct")
+    #datasets = os.listdir("paper_logs/correction/44/meta-llama_Llama-3.2-1B-Instruct")
     
-    for ds in datasets:
-        average_of_dataframes(paper_mode=True, dataset=ds)
+    #for ds in datasets:
+    #    average_of_dataframes(paper_mode=True, dataset=ds)
 
+    average_of_dataframes_mc(
+        df1_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed42.csv",
+        df2_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed43.csv",
+        df3_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed44.csv"
+    )
 
-    #average_of_dataframes(paper_mode=True)

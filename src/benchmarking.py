@@ -297,6 +297,7 @@ async def process_log_folder(folder_path: str, dataset_filter: str, sample_n: in
 
         # Output payload back to metrics.json
         with open(metrics_file, 'w') as f:
+            print("dumping to file", metrics_file)
             json.dump(metrics, f, indent=4)
             
         print(f"✅ Successfully updated official metrics for {os.path.basename(os.path.dirname(folder_path))}/{os.path.basename(folder_path)}")
@@ -409,3 +410,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    # By default benchmarking is skipped, because official metrics are already found

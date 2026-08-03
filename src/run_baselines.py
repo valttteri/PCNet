@@ -43,7 +43,7 @@ def main():
 
     master_metrics = {}
 
-    print(f"Starting Token & SOTA Baselines Benchmark on {device.upper()}")
+    print(f"[run_baselines.py] Starting Token & SOTA Baselines Benchmark on {device.upper()}")
     print(f"Models: {len(llm_models)} | Datasets: {len(datasets)}")
     print("=" * 60)
 
@@ -80,7 +80,7 @@ def main():
             safe_llm_str = llm_name.replace("/", "_")
             safe_ds_str = ds_name.replace("/", "_")
             
-            log_dir = os.path.join("logs", "baselines", safe_llm_str, safe_ds_str, str(args.seed))
+            log_dir = os.path.join("detection_logs", "baselines", safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
             print("[run_baselines.py/main()] Metrics path:", metrics_path)
             
@@ -118,6 +118,7 @@ def main():
             num_fake = min(len(train_fake), int(max_train_samples * 0.15))
             wild_mixture = train_true[:num_true] + train_fake[:num_fake]
             
+            # Wild mixture exists by default
             if wild_mixture:
                 raw_train_embeddings = []
                 with torch.no_grad():

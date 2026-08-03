@@ -950,7 +950,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="MC1/MC2 Correction Pipeline for TruthfulQA"
     )
-    parser.add_argument("config", help="Path to JSON config file")
+    parser.add_argument("--config", help="Path to JSON config file")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
     MCEvalPipeline(args.config, args.seed).execute()

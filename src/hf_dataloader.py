@@ -1,6 +1,9 @@
 import random
+import pandas as pd
 from datasets import load_dataset
 from tqdm import tqdm
+from tabulate import tabulate
+
 
 class UnifiedDataLoader:
     
@@ -22,15 +25,19 @@ class UnifiedDataLoader:
         return combined
 
     @staticmethod
-    def load_train_data(dataset_name, subset=None, split="data", max_samples=500, seed=42):
+    def load_train_data(dataset_name, subset=None, split="data", max_samples=500, seed=42, save_only=False):
         """Returns a tuple of two lists: (factual_texts, hallucinated_texts)"""
         factuals, hallucinations, _, _ = UnifiedDataLoader._load_and_parse(
-            dataset_name, subset, max_samples, seed, is_train=True
+            dataset_name, subset, max_samples, seed, save_only, is_train=True,
         )
+        
+        # save_only: save the dataset used currently
+        if save_only:
+            return [], []
         return factuals, hallucinations
 
     @staticmethod
-    def _load_and_parse(dataset_name, subset, max_samples, seed, is_train):
+    def _load_and_parse(dataset_name, subset, max_samples, seed, save_only, is_train):
         # 🔒 FORCE DETERMINISM: Reset the seed every time this function is called.
         # This guarantees the random negative swapping is 100% identical 
         # for all baselines, models, and scripts.
@@ -77,6 +84,14 @@ class UnifiedDataLoader:
 
         # Lock the HuggingFace shuffle to the same seed
         dataset = dataset.shuffle(seed=seed)
+
+        print("save only?", save_only)
+        if save_only:
+            df = pd.DataFrame(data=dataset)
+            print(tabulate(df[:10], headers="keys", tablefmt="github"))
+            df.to_csv(f"datasets/{dataset_name}_paper.csv", index=False)
+            print("Saved dataset to csv")
+            return [], [], [], []
         
         factuals = []
         hallucinations = []
