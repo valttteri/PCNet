@@ -57,7 +57,7 @@ def main():
 
     master_metrics = {}
 
-    print(f"🚀 Starting Massive Benchmark Suite on {device.upper()}")
+    print(f"[main.py] Starting Massive Benchmark Suite on {device.upper()}")
     print(f"⚙️  Mode: {'UNSUPERVISED' if is_unsup else 'SUPERVISED'}")
     print(f"Models: {len(llm_models)} | Datasets: {len(datasets)}")
     print("=" * 60)
@@ -93,7 +93,7 @@ def main():
             # Check if test logs already exist to skip run
             log_algo_folder = f"unsup_{algorithm}" if is_unsup else algorithm
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
-            log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            log_dir = os.path.join("pcnet_detection_logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)

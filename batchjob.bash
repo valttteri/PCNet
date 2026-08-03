@@ -17,5 +17,12 @@ export OMP_PROC_BIND=spread
 
 # Run the program
 #srun python src/correction_pipeline.py --config src/config/correction/llama3.2_1b.json --seed 44
-#srun python src/benchmarking.py --log_dir paper_logs/correction
-srun python compare_dataframes.py
+#srun python src/benchmarking.py --log_dir paper_logs/correction/42
+#srun python src/correction_pipeline_mc.py --config src/config/correction/llama3.2_1b.json --seed 44
+#srun python src/metrics.py --log_dir paper_logs/detection
+
+#srun  python src/run_baselines.py src/config/baselines/llama3.2_1b.json 42
+#srun python src/main.py src/config/sup/llama3.2_1b.json 42
+#srun python compare_dataframes.py
+#srun python src/train.py src/config/sup/llama3.2_1b.json 42
+srun python generate_data.py

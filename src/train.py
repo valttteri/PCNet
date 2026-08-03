@@ -13,6 +13,8 @@ from guardrail import LLM_PC_Guardrail
 from baselines import LatentMLPProbe
 from hf_dataloader import UnifiedDataLoader
 
+ONLY_SAVE_DATASET = False
+
 # ==========================================
 # 1. Memory Management & Data Loading
 # ==========================================
@@ -31,7 +33,8 @@ def load_hf_training_data(dataset_name, subset=None, split="data", max_samples=5
         subset=subset, 
         split=split, 
         max_samples=max_samples, 
-        seed=seed
+        seed=seed,
+        save_only=ONLY_SAVE_DATASET
     )
 
 
@@ -61,6 +64,11 @@ def train_guardrail(config):
         max_samples=config.get("max_train_samples", 1000),
         seed=config.get("seed", 42)
     )
+
+    if ONLY_SAVE_DATASET:
+        print(f"ONLY_SAVE_DATASET is {ONLY_SAVE_DATASET}, halted train_guardrail()")
+        # load_hf_training_data saved the dataset to a csv file, no need to proceed further
+        return
 
     # PCNet Initialization
     init_batch = true_texts[:min(32, len(true_texts))]
@@ -187,6 +195,12 @@ def main():
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa", "split": "data"}])
     algorithm = config.get("algorithm", "AttentionalPCNet_Guardrail")
 
+    if ONLY_SAVE_DATASET:
+        # We take this dataset, and save the subset used by the paper to a csv file
+        datasets = [
+            {"name": "truthful_qa", "subset": "generation"}
+        ]
+
     print(f"🚀 Starting Massive Training Suite | Models: {len(llm_models)} | Datasets: {len(datasets)}")
 
     for llm_name in llm_models:
@@ -210,9 +224,11 @@ def main():
             pc_path = os.path.join(weight_dir, "pcnet_best.pth")
             mlp_path = os.path.join(weight_dir, "mlp_probe_best.pth")
             # --- THE SKIP LOGIC ---
-            if os.path.exists(pc_path) and os.path.exists(mlp_path):
-                print(f"  ⏭️ Trained weights already exist at {weight_dir}. Skipping training!")
-                continue # Jumps to the next dataset/model without training
+
+            if not ONLY_SAVE_DATASET:
+                if os.path.exists(pc_path) and os.path.exists(mlp_path):
+                    print(f"  ⏭️ Trained weights already exist at {weight_dir}. Skipping training!")
+                    continue # Jumps to the next dataset/model without training
 
             current_config["hf_dataset_name"] = ds_name
             current_config["hf_subset_name"] = ds_subset
@@ -228,4 +244,5 @@ def main():
     print("\n🎉 ALL TRAINING COMPLETE.")
 
 if __name__ == "__main__":
+    ONLY_SAVE_DATASET = True
     main()
