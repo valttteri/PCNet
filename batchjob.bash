@@ -2,7 +2,7 @@
 #SBATCH --job-name=veahola
 #SBATCH --account=project_2013898
 #SBATCH --partition=gpumedium
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1 --cpus-per-task=72  # The product should be 72 if requesting 1 GPU per node
 #SBATCH --gres=gpu:gh200:1  # Corresponds to 1 GPU per node
@@ -22,7 +22,7 @@ export OMP_PROC_BIND=spread
 #srun python src/metrics.py --log_dir paper_logs/detection
 
 #srun  python src/run_baselines.py src/config/baselines/llama3.2_1b.json 42
-#srun python src/main.py src/config/sup/llama3.2_1b.json 42
+srun python src/main.py src/config/sup/llama3.2_1b.json 42
 #srun python compare_dataframes.py
 #srun python src/train.py src/config/sup/llama3.2_1b.json 42
-srun python generate_data.py
+#srun python generate_with_models.py

@@ -30,3 +30,4 @@ def check_gpu_usage():
 if __name__ == "__main__":
     #check_gpu_usage(msg="Checking")
     check_cuda()
+    check_gpu_usage()

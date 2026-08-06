@@ -46,7 +46,9 @@ def main():
     algorithm = config.get("algorithm", "PCNet_Guardrail")
     pc_in_channels = config.get("pc_in_channels", 128)
     max_train_samples = config.get("max_train_samples", 500)
-    max_samples = config.get("max_samples", None)
+    #max_samples = config.get("max_samples", None)
+    max_samples = 1000
+    
     batch_size = config.get("batch_size", 8)
     
     # --- UNSUPERVISED FLAG ---
@@ -54,6 +56,19 @@ def main():
     
     llm_models = config.get("llm_models", ["Qwen/Qwen2.5-0.5B"])
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa"}])
+
+    # Delete: test run for using coqa with each dataset
+    datasets = [
+        {
+            "name": "trivia_qa",
+            "subset": "rc.nocontext"
+        },
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": None,
+            "split": "test"
+        }
+    ]
 
     master_metrics = {}
 
@@ -93,7 +108,7 @@ def main():
             # Check if test logs already exist to skip run
             log_algo_folder = f"unsup_{algorithm}" if is_unsup else algorithm
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
-            log_dir = os.path.join("pcnet_detection_logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            log_dir = os.path.join("all_logs/pcnet_detection_logs2", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
@@ -106,6 +121,10 @@ def main():
                 continue 
 
             # --- Dynamic Weight Loading ---
+
+            # Delete: test run, use coqa weights for each dataset
+            safe_ds_str = "coqa"
+
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
             pc_weight_path = os.path.join(weight_dir, pc_weight_filename)
