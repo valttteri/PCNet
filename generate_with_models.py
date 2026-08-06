@@ -1,6 +1,7 @@
 import os
 import torch
 import json
+import boto3
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForMultimodalLM, BitsAndBytesConfig, AutoProcessor
 from datasets import load_dataset
@@ -18,36 +19,54 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL="https://bedrock-mantle.eu-north-1.api.aws/v1"
 
+BNB_CONFIG = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+
+"""
+Functions for generating answers with LLMs
+"""
+
 def generate_answers(
     model_name:str,
     dataset_path:str,
     output_path:str,
     sample_size:int,
-    verbose:bool,
-    save_results:bool
+    gguf_file:str=None,
+    verbose:bool=False,
+    save_results:bool=False
 ):
     """
     Generate answers for a dataset.
     """
     device = "cuda"
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-    )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-
-    if "llama" in model_name:
+    if gguf_file:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, gguf_file=gguf_file, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
-            model_name, 
-            quantization_config=bnb_config,
-            torch_dtype=torch.float16,
-            device_map=device,
-            trust_remote_code=True
-        )
-    elif "gemma" in model_name:
+                model_name,
+                gguf_file=gguf_file, 
+                torch_dtype=torch.float16,
+                device_map=device,
+                trust_remote_code=True
+            )
+    else:
+        # Normal model
+        logs.info("No gguf file detected")
+
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+                model_name, 
+                quantization_config=BNB_CONFIG,
+                torch_dtype=torch.float16,
+                device_map=device,
+                trust_remote_code=True
+            )
+        
+    if "gemma" in model_name:
         tokenizer = AutoProcessor.from_pretrained(model_name)
         model = AutoModelForMultimodalLM.from_pretrained(
             model_name,
@@ -88,8 +107,8 @@ def generate_answers(
             max_new_tokens=128,
             do_sample=True,
             temperature=0.7,
-            repetition_penalty=1.1
-            #pad_token_id=tokenizer.eos_token_id,
+            repetition_penalty=1.1,
+            #pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
         )
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
@@ -159,14 +178,14 @@ def generate_answers_with_api(
     verbose:bool,
     save_results:bool
 ):
-    #client = InferenceClient(api_key=HF_TOKEN)
+    client = InferenceClient(api_key=HF_TOKEN)
 
-    client = OpenAI(
-        base_url="https://router.huggingface.co/v1",
-        api_key=HF_TOKEN
-    )
+    #client = OpenAI(
+    #    base_url="https://router.huggingface.co/v1",
+    #    api_key=HF_TOKEN
+    #)
 
-    questions = ["Who are you?", "Where are you from?", "Name a European country."]
+    questions = ["What is your name?", "What is the oldest dog breed?", "Name a European country."]
 
     for i, q in enumerate(questions):
 
@@ -177,40 +196,100 @@ def generate_answers_with_api(
                 {"role": "user", "content": f"{q}"},
                 {"role": "assistant", "content": ""}
             ],
-            max_tokens=128
+            max_tokens=128 # For openai
         )
 
         #print(completion)
         print("Response:", completion.choices[0].message.content)
         print("Total tokens:", completion.usage.total_tokens)
 
-def generate_answers_with_aws():
-    client = OpenAI()
+def annotate_data(
+    dataset_path:str,
+    prompt_path:str,
+    model_name:str,
+    save_results=False
+):
+    with open(prompt_path, "r") as f:
+        prompt = f.read()
 
-    questions = ["Where is France located?", "When is Finland's independence day?", "What is the most popular dog breed?"]
+    # Local dataset    
+    dataset = pd.read_csv(dataset_path)
+    device = "cuda"
 
-    for q in questions:
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, 
+        quantization_config=BNB_CONFIG,
+        torch_dtype=torch.float16,
+        device_map=device,
+        trust_remote_code=True
+    )
 
-        response = client.chat.completions.create(
-            model="openai.gpt-oss-safeguard-120b",
-            messages=[
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": f"{q}"},
-                    {"role": "assistant", "content": ""}
-                ],
+    questions = dataset["question"]
+    ref_answers = dataset["answer"]
+    model_answers = dataset["gen_answer"]
+
+    labels = []
+
+    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
+        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
+
+        messages = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": ""}
+        ]
+        tokenized_input = tokenizer.apply_chat_template(
+            messages,
+            tokenize=True,
+            return_tensors="pt",
+            return_dict=True,          
+            add_generation_prompt=True 
+        ).to(device)                   
+
+        output_tokens = model.generate(
+            **tokenized_input,
+            max_new_tokens=128,
+            do_sample=True,
+            temperature=0.7,
+            repetition_penalty=1.1,
+            #pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
         )
-    
-        print(response)
+
+        new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
+        answer = tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+        if i % 5 == 0:
+            print(f"{i}/{len(dataset)} QA-pairs done")
+
+        labels.append(answer)
+
+    dataset[f"{model_name}_valtteri"] = labels
+    dataset.to_csv(dataset_path, index=False)
+    logs.info("Annotation ready.")
 
 
 if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
-    gemma_4_31b = "google/gemma-4-31B-it" # Works in Roihu
-    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Works in Roihu
+    gemma_4_31b = "google/gemma-4-31B-it" # Try in Roihu
+    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
+    gpt_oss_120b = "openai/gpt-oss-120b"
+    qwen3_72b_synthesis = "cognitivecomputations/Qwen3-72B-Synthesis"
+
+    # Model saved as gguf
+    qwen3_72b_instruct_gguf_model = "mradermacher/Qwen3-72B-Instruct-GGUF"
+    qwen3_72b_instruct_gguf_file = "Qwen3-72B-Instruct.Q4_K_M.gguf"
+
+    annotate_data(
+        dataset_path="datasets/triviaqa_1/random_sample20.csv",
+        prompt_path="prompts/annotation_prompt_for_tree_model.txt",
+        model_name=gemma_4_31b,
+        save_results=False
+    )
 
     #generate_answers_with_api(
-    #    model_name=gpt_oss_safeguard_120b,
+    #    model_name=llama_3p2_1b,
     #    dataset_path="",
     #    output_path="",
     #    sample_size=10,
@@ -223,12 +302,13 @@ if __name__ == "__main__":
     #    model_name=gemma_4_31b,
     #    dataset_path="trivia_qa",
     #    output_path="datasets/triviaqa_1",
-    #    sample_size=5,
+    #    sample_size=3,
+    #    gguf_file=None,
     #    verbose=True,
     #    save_results=False
     #)
 
-    generate_answers_with_aws()
+    #generate_answers_with_aws()
 
 """
 Example HF API output:
@@ -243,4 +323,9 @@ ChatCompletionOutput(
     object='chat.completion',
     time_info={'created': 1785762953.9742298, 'queue_time': 0.476599331, 'prompt_time': 0.002530569, 'completion_time': 5.032e-05, 'total_time': 0.48673486709594727}
 )
+
+Example model transfer from allas:
+
+cd huggingface/hub
+a-get veahola/models--google--gemma-4-31B-it.tar
 """

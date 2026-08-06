@@ -11,7 +11,7 @@ class UnifiedDataLoader:
     def load_test_data(dataset_name, subset=None, split="data", max_samples=500, seed=42, return_refs=False):
         """Returns a randomized list of tuples: (text, label) or (text, label, ref_answer) if return_refs=True."""
         factuals, hallucinations, refs_f, refs_h = UnifiedDataLoader._load_and_parse(
-            dataset_name, subset, max_samples, seed, is_train=False
+            dataset_name, subset, max_samples, seed, save_only=False, is_train=False
         )
 
         # Combine and label: 0 for Factual, 1 for Hallucinated
@@ -69,8 +69,11 @@ class UnifiedDataLoader:
         else:
             # Test gets exactly the reserved 25%
             split_slice = f"{base_split}[-25%:]"
+
+        # Example: The first 10% of "train" + the last 80% of "train"
+        # load_dataset('bookcorpus', split='train[:10%]+train[-80%:]')
             
-        print(f"📥 Downloading dataset: '{dataset_name}' (subset: '{subset}', split: '{split_slice}')...")
+        print(f"[hf_dataloader.py] Downloading dataset: '{dataset_name}' (subset: '{subset}', split: '{split_slice}')...")
         try:
             dataset = load_dataset(dataset_name, subset, split=split_slice)
             
@@ -84,6 +87,7 @@ class UnifiedDataLoader:
 
         # Lock the HuggingFace shuffle to the same seed
         dataset = dataset.shuffle(seed=seed)
+        print(f"[hf_dataloader.py] Dataset shape: {dataset.shape}, is_train={is_train}, max_samples={max_samples}")
 
         print("save only?", save_only)
         if save_only:
