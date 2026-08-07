@@ -58,17 +58,17 @@ def main():
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa"}])
 
     # Delete: test run for using coqa with each dataset
-    datasets = [
-        {
-            "name": "trivia_qa",
-            "subset": "rc.nocontext"
-        },
-        {
-            "name": "rajpurkar/squad_v2",
-            "subset": None,
-            "split": "test"
-        }
-    ]
+    #datasets = [
+    #    {
+    #        "name": "trivia_qa",
+    #        "subset": "rc.nocontext"
+    #    },
+    #    {
+    #        "name": "rajpurkar/squad_v2",
+    #        "subset": None,
+    #        "split": "test"
+    #    }
+    #]
 
     master_metrics = {}
 
@@ -108,7 +108,9 @@ def main():
             # Check if test logs already exist to skip run
             log_algo_folder = f"unsup_{algorithm}" if is_unsup else algorithm
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
-            log_dir = os.path.join("all_logs/pcnet_detection_logs2", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+
+            # Change 
+            log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
@@ -122,8 +124,8 @@ def main():
 
             # --- Dynamic Weight Loading ---
 
-            # Delete: test run, use coqa weights for each dataset
-            safe_ds_str = "coqa"
+            # Delete/change: test run, use coqa weights for each dataset
+            safe_ds_str = "rajpurkar_squad_v2"
 
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
@@ -227,7 +229,7 @@ def main():
     # Final Save
     os.makedirs("logs", exist_ok=True)
     summary_filename = "unsup_master_benchmark_summary.json" if is_unsup else "master_benchmark_summary.json"
-    summary_path = os.path.join("logs", summary_filename)
+    summary_path = os.path.join("all_logs/pcnet_detection_logs2", summary_filename)
     
     with open(summary_path, "w") as f:
         json.dump(master_metrics, f, indent=4)

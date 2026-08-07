@@ -70,9 +70,9 @@ if __name__ == "__main__":
     ]
 
     #format_answer_column(dataset_path="datasets/triviaqa_1/random_sample20.csv")
-    #create_data_subset(
-    #    dataset_path="datasets/triviaqa_1/data.csv",
-    #    subset_size=20,
-    #    output_path="datasets/triviaqa_1/random_sample20.csv",
-    #    columns=triviaqa_cols
-    #)
+    create_data_subset(
+        dataset_path="datasets/triviaqa_1/data.csv",
+        subset_size=20,
+        output_path="datasets/triviaqa_1/random_sample20.csv",
+        columns=triviaqa_cols
+    )
