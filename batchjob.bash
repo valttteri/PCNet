@@ -22,7 +22,7 @@ export OMP_PROC_BIND=spread
 #srun python src/metrics.py --log_dir paper_logs/detection
 
 #srun  python src/run_baselines.py src/config/baselines/llama3.2_1b.json 42
-srun python src/main.py src/config/sup/llama3.2_1b.json 42
+srun python src/main.py src/config/sup/llama3.2_1b.json 44
 #srun python compare_dataframes.py
 #srun python src/train.py src/config/sup/llama3.2_1b.json 42
 #srun python generate_with_models.py

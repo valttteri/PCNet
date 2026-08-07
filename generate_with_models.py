@@ -30,6 +30,39 @@ BNB_CONFIG = BitsAndBytesConfig(
 Functions for generating answers with LLMs
 """
 
+def generate_answers_with_api(
+    model_name:str,
+    dataset_path:str,
+    output_path:str,
+    sample_size:int,
+    verbose:bool,
+    save_results:bool
+):
+    client = InferenceClient(api_key=HF_TOKEN)
+
+    #client = OpenAI(
+    #    base_url="https://router.huggingface.co/v1",
+    #    api_key=HF_TOKEN
+    #)
+
+    questions = ["Can you access this website: https://da.wikipedia.org/wiki/Johnny_Depp ? If YES, return only the FIRST PARAGRAPH on the website. If NOT, return only 'No, I can not'."] 
+
+    for i, q in enumerate(questions):
+
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": f"{q}"},
+                {"role": "assistant", "content": ""}
+            ],
+            max_tokens=128 # For openai
+        )
+
+        #print(completion)
+        print("Response:", completion.choices[0].message.content)
+        print("Total tokens:", completion.usage.total_tokens)
+
 def generate_answers(
     model_name:str,
     dataset_path:str,
@@ -44,27 +77,22 @@ def generate_answers(
     """
     device = "cuda"
 
-    if gguf_file:
-        tokenizer = AutoTokenizer.from_pretrained(model_name, gguf_file=gguf_file, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                gguf_file=gguf_file, 
-                torch_dtype=torch.float16,
-                device_map=device,
-                trust_remote_code=True
-            )
-    else:
-        # Normal model
-        logs.info("No gguf file detected")
+    tokenizer_kwargs = {"trust_remote_code": True}
+    model_kwargs = {
+        "torch_dtype": torch.float16,
+        "device_map": device,
+        "trust_remote_code": True,
+    }
 
-        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-        model = AutoModelForCausalLM.from_pretrained(
-                model_name, 
-                quantization_config=BNB_CONFIG,
-                torch_dtype=torch.float16,
-                device_map=device,
-                trust_remote_code=True
-            )
+    if gguf_file:
+        tokenizer_kwargs["gguf_file"] = gguf_file
+        model_kwargs["gguf_file"] = gguf_file
+    else:
+        logs.info("No gguf file detected")
+        model_kwargs["quantization_config"] = BNB_CONFIG
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
         
     if "gemma" in model_name:
         tokenizer = AutoProcessor.from_pretrained(model_name)
@@ -85,7 +113,7 @@ def generate_answers(
         dataset = dataset.to_pandas()
 
     questions = dataset["question"]
-    answers = [] 
+    answers = []
 
     # Generate an answer for each question
     for i, q in enumerate(questions):
@@ -108,7 +136,7 @@ def generate_answers(
             do_sample=True,
             temperature=0.7,
             repetition_penalty=1.1,
-            #pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
+            pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
         )
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
@@ -119,7 +147,6 @@ def generate_answers(
 
         answers.append(answer)
     
-    dataset["gen_answer"] = answers
 
     # Print information for user
     if verbose:
@@ -131,6 +158,7 @@ def generate_answers(
     
     # Save the generated answers and a log entry
     if save_results:
+        dataset["gen_answer"] = answers
         dataset.to_csv(f"{output_path}/data.csv", index=False)
     
         generate_bookkeeping(
@@ -170,38 +198,51 @@ def generate_bookkeeping(model_name, output_path, sample_size):
     with open(f"{output_path}/log.json", "w") as f:
         json.dump(log_entry, f)
 
-def generate_answers_with_api(
-    model_name:str,
+def annotate_data_with_api(
     dataset_path:str,
-    output_path:str,
-    sample_size:int,
-    verbose:bool,
-    save_results:bool
+    prompt_path:str,
+    model_name:str,
+    save_results=False
 ):
+    """
+    Annotate QA-pairs using the Huggingface API
+    """
+
     client = InferenceClient(api_key=HF_TOKEN)
+    dataset = pd.read_csv(dataset_path)
 
-    #client = OpenAI(
-    #    base_url="https://router.huggingface.co/v1",
-    #    api_key=HF_TOKEN
-    #)
+    with open(prompt_path, "r") as f:
+        prompt = f.read()
 
-    questions = ["What is your name?", "What is the oldest dog breed?", "Name a European country."]
+    questions = dataset["question"]
+    ref_answers = dataset["answer"]
+    model_answers = dataset["gen_answer"]
 
-    for i, q in enumerate(questions):
+    labels = []
+    total_tokens = 0
+
+    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
+        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
 
         completion = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": f"{q}"},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_input},
                 {"role": "assistant", "content": ""}
             ],
-            max_tokens=128 # For openai
         )
 
-        #print(completion)
-        print("Response:", completion.choices[0].message.content)
-        print("Total tokens:", completion.usage.total_tokens)
+        label = completion.choices[0].message.content # Label decided by model
+        tokens_spent = completion.usage.total_tokens # Cost of this api call
+        
+        labels.append(label)
+        total_tokens += tokens_spent
+
+    if save_results:
+        dataset[f"{model_name}_valtteriV2"] = labels
+        dataset.to_csv(dataset_path, index=False)
+        logs.info(f"Annotation ready. Cost: {total_tokens} tokens.")
 
 def annotate_data(
     dataset_path:str,
@@ -264,13 +305,15 @@ def annotate_data(
 
         labels.append(answer)
 
-    dataset[f"{model_name}_valtteri"] = labels
-    dataset.to_csv(dataset_path, index=False)
-    logs.info("Annotation ready.")
+    if save_results:
+        dataset[f"{model_name}_valtteriV2"] = labels
+        dataset.to_csv(dataset_path, index=False)
+        logs.info("Annotation ready.")
 
 
 if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
+    llama_3p1_8b = "meta-llama/Llama-3.1-8B-Instruct"
     gemma_4_31b = "google/gemma-4-31B-it" # Try in Roihu
     qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
@@ -281,34 +324,39 @@ if __name__ == "__main__":
     qwen3_72b_instruct_gguf_model = "mradermacher/Qwen3-72B-Instruct-GGUF"
     qwen3_72b_instruct_gguf_file = "Qwen3-72B-Instruct.Q4_K_M.gguf"
 
-    annotate_data(
-        dataset_path="datasets/triviaqa_1/random_sample20.csv",
-        prompt_path="prompts/annotation_prompt_for_tree_model.txt",
-        model_name=gemma_4_31b,
-        save_results=False
+    #annotate_data(
+    #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
+    #    prompt_path="prompts/valtteri_tree_model_v2.txt",
+    #    model_name=gemma_4_31b,
+    #    save_results=True
+    #)
+
+    #annotate_data_with_api(
+    #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
+    #    prompt_path="prompts/valtteri_tree_model_v2.txt",
+    #    model_name=qwen3_next_80b_a3b_instruct,
+    #    save_results=False
+    #)
+
+
+    generate_answers(
+        model_name=llama_3p1_8b,
+        dataset_path="trivia_qa",
+        output_path="datasets/triviaqa_2",
+        sample_size=1000,
+        gguf_file=None,
+        verbose=False,
+        save_results=True
     )
 
     #generate_answers_with_api(
-    #    model_name=llama_3p2_1b,
+    #    model_name=qwen3_next_80b_a3b_instruct,
     #    dataset_path="",
     #    output_path="",
-    #    sample_size=10,
+    #    sample_size=0,
     #    verbose=False,
     #    save_results=False
     #)
-
-
-    #generate_answers(
-    #    model_name=gemma_4_31b,
-    #    dataset_path="trivia_qa",
-    #    output_path="datasets/triviaqa_1",
-    #    sample_size=3,
-    #    gguf_file=None,
-    #    verbose=True,
-    #    save_results=False
-    #)
-
-    #generate_answers_with_aws()
 
 """
 Example HF API output:
