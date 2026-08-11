@@ -215,10 +215,9 @@ if __name__ == "__main__":
     #)
     
     json_file_paths = [
-        "all_logs/pcnet_detection_logs2/PCNet_Guardrail/42/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/42/metrics.json",
-        "all_logs/pcnet_detection_logs2/PCNet_Guardrail/43/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/43/metrics.json",
-        "all_logs/pcnet_detection_logs2/PCNet_Guardrail/44/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/44/metrics.json"
-
+        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/42/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/42/metrics.json",
+        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/43/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/43/metrics.json",
+        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/44/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/44/metrics.json",
     ]
 
     paper_detection_result_paths = [
@@ -233,5 +232,5 @@ if __name__ == "__main__":
         file_paths=paper_detection_result_paths,
         model_name="meta-llama_Llama-3.1-8B-Instruct",
         dataset_name="coqa",
-        output_path="comparisons/detection_logs_paper",
+        output_path="comparisons/main_truthfulqa_only",
     )
