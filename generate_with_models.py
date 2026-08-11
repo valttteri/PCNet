@@ -2,6 +2,7 @@ import os
 import torch
 import json
 import boto3
+import ast
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForMultimodalLM, BitsAndBytesConfig, AutoProcessor
 from datasets import load_dataset
@@ -310,6 +311,59 @@ def annotate_data(
         dataset.to_csv(dataset_path, index=False)
         logs.info("Annotation ready.")
 
+def annotate_data_with_openai(
+    dataset_path:str,
+    prompt_path:str,
+    output_path:str,
+    model_name:str,
+    save_results=False
+):
+    client = OpenAI()
+    dataset = pd.read_csv(dataset_path)
+
+    with open(prompt_path, "r") as f:
+        prompt = f.read()
+
+    questions = dataset["question"]
+    ref_answers = dataset["answer"]
+    model_answers = dataset["gen_answer"]
+
+    labels = []
+    confidences = []
+    total_tokens = 0
+
+    # Create a chatbot using ChatCompletion.create() function
+    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
+
+        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
+        completion = client.chat.completions.create(
+          model=model_name,
+          messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": ""}
+          ]
+        )
+
+        response = completion.choices[0].message.content 
+        response_dict = ast.literal_eval(response) # Label and confidence decided by model, as Python dict
+        tokens_spent = completion.usage.total_tokens # Cost of this api call
+        
+        labels.append(response_dict["label"])
+        confidences.append(response_dict["confidence"])
+        total_tokens += tokens_spent
+
+        if i % 10 == 0:
+            logs.info(f"{i}/{len(dataset)} QA-pairs annotated. Total tokens spent: {total_tokens}")
+
+    if save_results:
+        dataset[f"{model_name}_promptP2_labels"] = labels
+        dataset[f"{model_name}_promptP2_confs"] = confidences
+
+        output_filepath = f"{output_path}/data_{model_name}_labels.csv"
+        dataset.to_csv(output_filepath, index=False)
+        logs.info(f"Annotation ready. Cost: {total_tokens} tokens.")
+
 
 if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
@@ -318,11 +372,20 @@ if __name__ == "__main__":
     qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
     gpt_oss_120b = "openai/gpt-oss-120b"
+    gpt_5p4 = "gpt-5.4"
     qwen3_72b_synthesis = "cognitivecomputations/Qwen3-72B-Synthesis"
 
     # Model saved as gguf
     qwen3_72b_instruct_gguf_model = "mradermacher/Qwen3-72B-Instruct-GGUF"
     qwen3_72b_instruct_gguf_file = "Qwen3-72B-Instruct.Q4_K_M.gguf"
+
+    annotate_data_with_openai(
+        dataset_path="datasets/triviaqa_2/data.csv",
+        prompt_path="prompts/labeling_problem_p2.txt",
+        output_path="datasets/triviaqa_2",
+        model_name=gpt_5p4,
+        save_results=True
+    )
 
     #annotate_data(
     #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
@@ -339,15 +402,15 @@ if __name__ == "__main__":
     #)
 
 
-    generate_answers(
-        model_name=llama_3p1_8b,
-        dataset_path="trivia_qa",
-        output_path="datasets/triviaqa_2",
-        sample_size=1000,
-        gguf_file=None,
-        verbose=False,
-        save_results=True
-    )
+    #generate_answers(
+    #    model_name=llama_3p1_8b,
+    #    dataset_path="trivia_qa",
+    #    output_path="datasets/triviaqa_2",
+    #    sample_size=1000,
+    #    gguf_file=None,
+    #    verbose=False,
+    #    save_results=True
+    #)
 
     #generate_answers_with_api(
     #    model_name=qwen3_next_80b_a3b_instruct,

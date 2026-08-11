@@ -244,5 +244,5 @@ def main():
     print("\n🎉 ALL TRAINING COMPLETE.")
 
 if __name__ == "__main__":
-    ONLY_SAVE_DATASET = True
+    ONLY_SAVE_DATASET = False
     main()
