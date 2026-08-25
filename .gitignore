@@ -11,6 +11,7 @@ correction_pipeline_logs
 comparisons
 evaluation_reports
 venv
+cpu_venv
 checkpoints
 idle.py
 setenv.sh

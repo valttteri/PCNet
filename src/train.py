@@ -64,7 +64,7 @@ def train_guardrail(config):
         max_samples=config.get("max_train_samples", 1000),
         seed=config.get("seed", 42)
     )
-
+    
     if ONLY_SAVE_DATASET:
         print(f"ONLY_SAVE_DATASET is {ONLY_SAVE_DATASET}, halted train_guardrail()")
         # load_hf_training_data saved the dataset to a csv file, no need to proceed further
@@ -225,10 +225,10 @@ def main():
             mlp_path = os.path.join(weight_dir, "mlp_probe_best.pth")
             # --- THE SKIP LOGIC ---
 
-            if not ONLY_SAVE_DATASET:
-                if os.path.exists(pc_path) and os.path.exists(mlp_path):
-                    print(f"  ⏭️ Trained weights already exist at {weight_dir}. Skipping training!")
-                    continue # Jumps to the next dataset/model without training
+            #if not ONLY_SAVE_DATASET:
+            #    if os.path.exists(pc_path) and os.path.exists(mlp_path):
+            #        print(f"  ⏭️ Trained weights already exist at {weight_dir}. Skipping training!")
+            #        continue # Jumps to the next dataset/model without training
 
             current_config["hf_dataset_name"] = ds_name
             current_config["hf_subset_name"] = ds_subset

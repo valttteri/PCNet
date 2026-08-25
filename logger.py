@@ -2,6 +2,7 @@ from rich.console import Console
 
 #0B6623 Forest green
 #00DF00 Grass green
+#780606 Blood red
 
 class Logger:
     def __init__(self):
@@ -12,6 +13,9 @@ class Logger:
 
     def info(self, msg: str):
         self.console.print(f"[#0B6623 on white]INFO:[/#0B6623 on white] [black on #00DF00]{msg}[/black on #00DF00]")
+    
+    def error(self, msg: str):
+        self.console.print(f"[#0B6623 on white]ERROR:[/#0B6623 on white] [white on #780606]{msg}[/white on #780606]")
 
     def print_array(self, arr: list):
         self.console.print("\n######################ARRAY/TUPLE########################", style="#0B6623 on white")

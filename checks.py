@@ -28,6 +28,5 @@ def check_gpu_usage():
     print(f"Current GPU usage: {torch.cuda.memory.memory_reserved()/1e9:.2f} GB")
 
 if __name__ == "__main__":
-    #check_gpu_usage(msg="Checking")
     check_cuda()
     check_gpu_usage()

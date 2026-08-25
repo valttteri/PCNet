@@ -164,8 +164,13 @@ def average_of_json_files(
     avg_values = {}
 
     for i, fp in enumerate(file_paths):
-        with open(fp, "r") as file:
-            data = json.load(file)
+        # Iterate over the json file paths
+        try:
+            with open(fp, "r") as file:
+                data = json.load(file)
+        except FileNotFoundError:
+            logs.error(f"Results do not exist in {fp}")
+            return
 
         for j, (method, metrics) in enumerate(data.items()):
             if method == "Experiment_Info":
@@ -214,23 +219,20 @@ if __name__ == "__main__":
     #    df3_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed44.csv"
     #)
     
-    json_file_paths = [
-        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/42/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/42/metrics.json",
-        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/43/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/43/metrics.json",
-        "all_logs/pcnet_detection_logs_truthfulqa_only/PCNet_Guardrail/44/meta-llama_Llama-3.2-1B-Instruct/truthful_qa/44/metrics.json",
-    ]
+    weights = "coqa"
+    datasets = ["coqa", "truthful_qa"]
+    seeds = [42, 43, 44]
 
-    paper_detection_result_paths = [
-        "all_logs/paper_logs/detection/42/meta-llama_Llama-3.1-8B-Instruct/coqa/metrics.json",
-        "all_logs/paper_logs/detection/43/meta-llama_Llama-3.1-8B-Instruct/coqa/metrics.json",
-        "all_logs/paper_logs/detection/44/meta-llama_Llama-3.1-8B-Instruct/coqa/metrics.json"
-    ]
+    for ds in datasets:
+        json_file_paths = [
+            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[0]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[0]}/metrics.json",
+            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[1]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[1]}/metrics.json",
+            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[2]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[2]}/metrics.json"
+        ]
 
-    #test()
-
-    average_of_json_files(
-        file_paths=paper_detection_result_paths,
-        model_name="meta-llama_Llama-3.1-8B-Instruct",
-        dataset_name="coqa",
-        output_path="comparisons/main_truthfulqa_only",
-    )
+        average_of_json_files(
+            file_paths=json_file_paths,
+            model_name="Qwen_Qwen3-4B-Instruct-2507",
+            dataset_name=ds,
+            output_path=f"comparisons/pcnet_exp1_main_py_results/{weights}_pcnet_weights",
+        )
