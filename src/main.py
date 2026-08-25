@@ -47,6 +47,8 @@ def main():
     pc_in_channels = config.get("pc_in_channels", 128)
     max_train_samples = config.get("max_train_samples", 500)
     #max_samples = config.get("max_samples", None)
+
+    # Limit max saples to 1000 to avoid
     max_samples = 1000
     
     batch_size = config.get("batch_size", 8)
@@ -57,15 +59,34 @@ def main():
     llm_models = config.get("llm_models", ["Qwen/Qwen2.5-0.5B"])
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa"}])
 
-    # Delete: test run for using coqa with each dataset
-    #datasets = [
+    # Change/delete: run with only specific datasets
+    datasets = [
+        {
+            "name": "coqa",
+            "subset": None
+        },
+        {
+            "name": "truthful_qa",
+            "subset": "generation"
+        }
+    ]
+
+    #"datasets": [
+    #    {
+    #        "name": "coqa",
+    #        "subset": null
+    #    },
+    #    {
+    #        "name": "truthful_qa",
+    #        "subset": "generation"
+    #    },
     #    {
     #        "name": "trivia_qa",
     #        "subset": "rc.nocontext"
     #    },
     #    {
     #        "name": "rajpurkar/squad_v2",
-    #        "subset": None,
+    #        "subset": null,
     #        "split": "test"
     #    }
     #]
@@ -109,8 +130,11 @@ def main():
             log_algo_folder = f"unsup_{algorithm}" if is_unsup else algorithm
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
 
-            # Change 
+            # Change/delete: The folder where metrics are saved 
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_truthfulqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_triviaqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
@@ -124,8 +148,11 @@ def main():
 
             # --- Dynamic Weight Loading ---
 
-            # Delete/change: test run, use coqa weights for each dataset
+            # Change/delete: use same PCNet weights for each dataset
+            #safe_ds_str = "truthful_qa"
             safe_ds_str = "rajpurkar_squad_v2"
+            #safe_ds_str = "trivia_qa"
+            #safe_ds_str = "coqa"
 
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"

@@ -10,8 +10,10 @@ from huggingface_hub import model_info, InferenceClient
 from datetime import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
+from tabulate import tabulate
 
 from logger import Logger
+from data_tools import format_trivia_qa, get_model_generation_kwargs
 
 load_dotenv()
 logs = Logger()
@@ -69,12 +71,18 @@ def generate_answers(
     dataset_path:str,
     output_path:str,
     sample_size:int,
+    identifier:int,
     gguf_file:str=None,
     verbose:bool=False,
     save_results:bool=False
 ):
     """
-    Generate answers for a dataset.
+    Generate answers for a dataset. Pipeline:
+
+    1. Load model
+    2. Load dataset
+    3. Generate answers until a desired amount of complete answers are ready
+    4. Save results to a csv file and a log entry to a json file
     """
     device = "cuda"
 
@@ -92,9 +100,15 @@ def generate_answers(
         logs.info("No gguf file detected")
         model_kwargs["quantization_config"] = BNB_CONFIG
 
+    # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
     model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-        
+    eos_tokens = model.generation_config.eos_token_id
+
+    if len(eos_tokens) == 0:
+        logs.error("No EOS Tokens found")
+        return
+
     if "gemma" in model_name:
         tokenizer = AutoProcessor.from_pretrained(model_name)
         model = AutoModelForMultimodalLM.from_pretrained(
@@ -108,21 +122,39 @@ def generate_answers(
     if dataset_path.endswith(".csv"):
         dataset = pd.read_csv(dataset_path)
     else:
-        # Load dataset from huggingface
+        # Load dataset from huggingface and do preprocessing
         if "trivia_qa" in dataset_path:
-            dataset = load_dataset(dataset_path, "rc.nocontext", split=f"validation[:{sample_size}]")
-        dataset = dataset.to_pandas()
+            dataset = load_dataset(dataset_path, "rc.nocontext", split=f"validation")
+            dataset = dataset.to_pandas()
 
+            dataset = format_trivia_qa(dataset)
+
+    dataset = dataset.sample(frac=1).reset_index(drop=True)
     questions = dataset["question"]
-    answers = []
+
+    logs.info(f"Dataset length: {dataset.shape}")
+
+    # Arrays for answers, and 1/0 values indicating if the answers were completed
+    answers, is_completed = [], []
+
+    #logs.info(f"eos tokens: {eos_tokens}")
+    #logs.info(f"eos tokens is a list {isinstance(eos_tokens, list)}")
 
     # Generate an answer for each question
     for i, q in enumerate(questions):
+        if sum(is_completed) == sample_size:
+            logs.info(f"{sum(is_completed)} complete answers generated after {len(is_completed)} iterations")
+            break
+        if len(answers) == 20 and sum(is_completed) <= 5:
+            logs.info(f"Model is producing mostly incomplete answers: {len(answers)} anwers, {sum(is_completed)} complete")
+            break
+
         messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "system", "content": "You are a helpful assistant. Provide short answers."},
             {"role": "user", "content": f"{q}"},
             {"role": "assistant", "content": ""}
         ]
+        # Tokenize the input prompt
         tokenized_input = tokenizer.apply_chat_template(
             messages,
             tokenize=True,
@@ -131,41 +163,63 @@ def generate_answers(
             add_generation_prompt=True 
         ).to(device)                   
 
+        # Generate tokens
+        generation_kwargs = get_model_generation_kwargs(model_name=model_name, default=True)
         output_tokens = model.generate(
             **tokenized_input,
-            max_new_tokens=128,
-            do_sample=True,
-            temperature=0.7,
-            repetition_penalty=1.1,
-            pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
+            **generation_kwargs
         )
 
+
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
-        answer = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        answer = tokenizer.decode(new_tokens, skip_special_tokens=False)
 
-        if i % 25 == 0:
-            print(f"{i}/{len(dataset)} QA-pairs done")
-
+        # Generated answers ends in an eos token
+        if new_tokens[-1] in eos_tokens:
+            is_completed.append(1)
+        else:
+            is_completed.append(0)
         answers.append(answer)
+        
+        if i % 5 == 0:
+            print(f"{i} Answers generated, {sum(is_completed)} are complete")
+
+        # Cutoff for debugging
+
+        if i == 3:
+            return
     
+    # The subset of data we want
+    data_subset = dataset.iloc[:len(answers)]
 
     # Print information for user
     if verbose:
-        logs.info(f"questions: {questions}")
-        
         for i, a in enumerate(answers):
             logs.info("###########")
-            logs.info(f"answer {i}: {a}")
+            logs.info(f"question {i}: {questions.iloc[i]}")
+            logs.info(f"answer {i}, complete={is_completed[i]}: {a}\n")
     
     # Save the generated answers and a log entry
     if save_results:
-        dataset["gen_answer"] = answers
-        dataset.to_csv(f"{output_path}/data.csv", index=False)
+        logs.info(f"Dataset length before filtering: {len(data_subset)}")
+        data_subset.loc[:, "gen_answer"] = answers
+        data_subset.loc[:, "is_complete"] = is_completed
+        
+        # Drop all rows that contain an incomplete answer
+        data_subset = data_subset[data_subset["is_complete"] == 1]
+        data_subset = data_subset.drop(columns=["is_complete"])
+
+        logs.info(f"Dataset length after filtering: {len(data_subset)}")
+
+        return
+
+        data_subset.to_csv(f"{output_path}/sample_{identifier}_size{sample_size}.csv", index=False)
     
         generate_bookkeeping(
             model_name=model_name,
             output_path=output_path,
-            sample_size=sample_size
+            sample_size=sample_size,
+            identifier=identifier
         )
 
 def generate_bookkeeping(model_name, output_path, sample_size):
@@ -184,19 +238,20 @@ def generate_bookkeeping(model_name, output_path, sample_size):
     dataset_info = {
         "name": "trivia_qa",
         "subset": "rc.nocontext",
-        "split": f"validation[:{sample_size}]"
+        "split": f"validation"
     }
 
     log_entry = {
         "model_name": model_name,
         "model_sha": commit_id,
         "dataset": dataset_info,
+        "sample_size": sample_size,
         "date": formatted_date,
-        "source_code": "generate_data.py",
+        "source_code": "generate_with_models.py",
         "prompt": prompt
     }
 
-    with open(f"{output_path}/log.json", "w") as f:
+    with open(f"{output_path}/log_{identifier}.json", "w") as f:
         json.dump(log_entry, f)
 
 def annotate_data_with_api(
@@ -291,11 +346,11 @@ def annotate_data(
 
         output_tokens = model.generate(
             **tokenized_input,
-            max_new_tokens=128,
+            max_new_tokens=150,
             do_sample=True,
             temperature=0.7,
             repetition_penalty=1.1,
-            #pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
+            pad_token_id=tokenizer.eos_token_id # Comment out for gemma models
         )
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
@@ -379,13 +434,17 @@ if __name__ == "__main__":
     qwen3_72b_instruct_gguf_model = "mradermacher/Qwen3-72B-Instruct-GGUF"
     qwen3_72b_instruct_gguf_file = "Qwen3-72B-Instruct.Q4_K_M.gguf"
 
-    annotate_data_with_openai(
-        dataset_path="datasets/triviaqa_2/data.csv",
-        prompt_path="prompts/labeling_problem_p2.txt",
-        output_path="datasets/triviaqa_2",
-        model_name=gpt_5p4,
-        save_results=True
-    )
+    # Bigger models
+    llama_3_70b = "meta-llama/Meta-Llama-3-70B-Instruct" # Too large
+    qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B"
+
+    #annotate_data_with_openai(
+    #    dataset_path="datasets/triviaqa_2/data.csv",
+    #    prompt_path="prompts/labeling_problem_p2.txt",
+    #    output_path="datasets/triviaqa_2",
+    #    model_name=gpt_5p4,
+    #    save_results=True
+    #)
 
     #annotate_data(
     #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
@@ -401,16 +460,16 @@ if __name__ == "__main__":
     #    save_results=False
     #)
 
-
-    #generate_answers(
-    #    model_name=llama_3p1_8b,
-    #    dataset_path="trivia_qa",
-    #    output_path="datasets/triviaqa_2",
-    #    sample_size=1000,
-    #    gguf_file=None,
-    #    verbose=False,
-    #    save_results=True
-    #)
+    generate_answers(
+        model_name=llama_3p1_8b,
+        dataset_path="trivia_qa",
+        output_path="datasets/triviaqa_filtered_samples",
+        sample_size=20,
+        identifier=1,
+        gguf_file=None,
+        verbose=True,
+        save_results=True
+    )
 
     #generate_answers_with_api(
     #    model_name=qwen3_next_80b_a3b_instruct,
