@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from tabulate import tabulate
 
 from logger import Logger
-from data_tools import format_trivia_qa, get_model_generation_kwargs
+from data_tools import format_trivia_qa, get_model_generation_kwargs, get_model_and_tokenizer_kwargs, generate_bookkeeping
 
 load_dotenv()
 logs = Logger()
@@ -23,11 +23,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL="https://bedrock-mantle.eu-north-1.api.aws/v1"
 
 BNB_CONFIG = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-        )
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+)
 
 """
 Functions for generating answers with LLMs
@@ -74,7 +74,7 @@ def generate_answers(
     identifier:int,
     gguf_file:str=None,
     verbose:bool=False,
-    save_results:bool=False
+    save_results:bool=False,
 ):
     """
     Generate answers for a dataset. Pipeline:
@@ -86,19 +86,7 @@ def generate_answers(
     """
     device = "cuda"
 
-    tokenizer_kwargs = {"trust_remote_code": True}
-    model_kwargs = {
-        "torch_dtype": torch.float16,
-        "device_map": device,
-        "trust_remote_code": True,
-    }
-
-    if gguf_file:
-        tokenizer_kwargs["gguf_file"] = gguf_file
-        model_kwargs["gguf_file"] = gguf_file
-    else:
-        logs.info("No gguf file detected")
-        model_kwargs["quantization_config"] = BNB_CONFIG
+    model_kwargs, chat_template_kwargs, tokenizer_kwargs = get_model_and_tokenizer_kwargs(model_name=model_name)
 
     # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
@@ -108,6 +96,7 @@ def generate_answers(
     if len(eos_tokens) == 0:
         logs.error("No EOS Tokens found")
         return
+    logs.info(f"eos tokens: {eos_tokens}")
 
     if "gemma" in model_name:
         tokenizer = AutoProcessor.from_pretrained(model_name)
@@ -137,11 +126,9 @@ def generate_answers(
     # Arrays for answers, and 1/0 values indicating if the answers were completed
     answers, is_completed = [], []
 
-    #logs.info(f"eos tokens: {eos_tokens}")
-    #logs.info(f"eos tokens is a list {isinstance(eos_tokens, list)}")
-
     # Generate an answer for each question
     for i, q in enumerate(questions):
+        logs.info(f"Iteration number {i+1}")
         if sum(is_completed) == sample_size:
             logs.info(f"{sum(is_completed)} complete answers generated after {len(is_completed)} iterations")
             break
@@ -150,26 +137,26 @@ def generate_answers(
             break
 
         messages = [
-            {"role": "system", "content": "You are a helpful assistant. Provide short answers."},
+            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": f"{q}"},
             {"role": "assistant", "content": ""}
         ]
         # Tokenize the input prompt
         tokenized_input = tokenizer.apply_chat_template(
             messages,
-            tokenize=True,
-            return_tensors="pt",
-            return_dict=True,          
-            add_generation_prompt=True 
+            **chat_template_kwargs
         ).to(device)                   
 
+        # Get model-specific generation args
+        generation_kwargs = get_model_generation_kwargs(
+            model_name=model_name,
+            tokenizer=tokenizer
+        )
         # Generate tokens
-        generation_kwargs = get_model_generation_kwargs(model_name=model_name, default=True)
         output_tokens = model.generate(
             **tokenized_input,
             **generation_kwargs
         )
-
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
         answer = tokenizer.decode(new_tokens, skip_special_tokens=False)
@@ -181,14 +168,9 @@ def generate_answers(
             is_completed.append(0)
         answers.append(answer)
         
-        if i % 5 == 0:
-            print(f"{i} Answers generated, {sum(is_completed)} are complete")
+        if (i+1) % 5 == 0:
+            print(f"{i+1} Answers generated, {sum(is_completed)} are complete")
 
-        # Cutoff for debugging
-
-        if i == 3:
-            return
-    
     # The subset of data we want
     data_subset = dataset.iloc[:len(answers)]
 
@@ -222,204 +204,6 @@ def generate_answers(
             identifier=identifier
         )
 
-def generate_bookkeeping(model_name, output_path, sample_size):
-    m_info = model_info(model_name)
-    commit_id = m_info.sha
-
-    date_today = datetime.now()
-    formatted_date = date_today.strftime("%d/%m/%Y")
-
-    prompt = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "<question>"},
-        {"role": "assistant", "content": ""}
-    ]
-
-    dataset_info = {
-        "name": "trivia_qa",
-        "subset": "rc.nocontext",
-        "split": f"validation"
-    }
-
-    log_entry = {
-        "model_name": model_name,
-        "model_sha": commit_id,
-        "dataset": dataset_info,
-        "sample_size": sample_size,
-        "date": formatted_date,
-        "source_code": "generate_with_models.py",
-        "prompt": prompt
-    }
-
-    with open(f"{output_path}/log_{identifier}.json", "w") as f:
-        json.dump(log_entry, f)
-
-def annotate_data_with_api(
-    dataset_path:str,
-    prompt_path:str,
-    model_name:str,
-    save_results=False
-):
-    """
-    Annotate QA-pairs using the Huggingface API
-    """
-
-    client = InferenceClient(api_key=HF_TOKEN)
-    dataset = pd.read_csv(dataset_path)
-
-    with open(prompt_path, "r") as f:
-        prompt = f.read()
-
-    questions = dataset["question"]
-    ref_answers = dataset["answer"]
-    model_answers = dataset["gen_answer"]
-
-    labels = []
-    total_tokens = 0
-
-    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
-        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
-
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": user_input},
-                {"role": "assistant", "content": ""}
-            ],
-        )
-
-        label = completion.choices[0].message.content # Label decided by model
-        tokens_spent = completion.usage.total_tokens # Cost of this api call
-        
-        labels.append(label)
-        total_tokens += tokens_spent
-
-    if save_results:
-        dataset[f"{model_name}_valtteriV2"] = labels
-        dataset.to_csv(dataset_path, index=False)
-        logs.info(f"Annotation ready. Cost: {total_tokens} tokens.")
-
-def annotate_data(
-    dataset_path:str,
-    prompt_path:str,
-    model_name:str,
-    save_results=False
-):
-    with open(prompt_path, "r") as f:
-        prompt = f.read()
-
-    # Local dataset    
-    dataset = pd.read_csv(dataset_path)
-    device = "cuda"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, 
-        quantization_config=BNB_CONFIG,
-        torch_dtype=torch.float16,
-        device_map=device,
-        trust_remote_code=True
-    )
-
-    questions = dataset["question"]
-    ref_answers = dataset["answer"]
-    model_answers = dataset["gen_answer"]
-
-    labels = []
-
-    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
-        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
-
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": user_input},
-            {"role": "assistant", "content": ""}
-        ]
-        tokenized_input = tokenizer.apply_chat_template(
-            messages,
-            tokenize=True,
-            return_tensors="pt",
-            return_dict=True,          
-            add_generation_prompt=True 
-        ).to(device)                   
-
-        output_tokens = model.generate(
-            **tokenized_input,
-            max_new_tokens=150,
-            do_sample=True,
-            temperature=0.7,
-            repetition_penalty=1.1,
-            pad_token_id=tokenizer.eos_token_id # Comment out for gemma models
-        )
-
-        new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
-        answer = tokenizer.decode(new_tokens, skip_special_tokens=True)
-
-        if i % 5 == 0:
-            print(f"{i}/{len(dataset)} QA-pairs done")
-
-        labels.append(answer)
-
-    if save_results:
-        dataset[f"{model_name}_valtteriV2"] = labels
-        dataset.to_csv(dataset_path, index=False)
-        logs.info("Annotation ready.")
-
-def annotate_data_with_openai(
-    dataset_path:str,
-    prompt_path:str,
-    output_path:str,
-    model_name:str,
-    save_results=False
-):
-    client = OpenAI()
-    dataset = pd.read_csv(dataset_path)
-
-    with open(prompt_path, "r") as f:
-        prompt = f.read()
-
-    questions = dataset["question"]
-    ref_answers = dataset["answer"]
-    model_answers = dataset["gen_answer"]
-
-    labels = []
-    confidences = []
-    total_tokens = 0
-
-    # Create a chatbot using ChatCompletion.create() function
-    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
-
-        user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
-        completion = client.chat.completions.create(
-          model=model_name,
-          messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": user_input},
-            {"role": "assistant", "content": ""}
-          ]
-        )
-
-        response = completion.choices[0].message.content 
-        response_dict = ast.literal_eval(response) # Label and confidence decided by model, as Python dict
-        tokens_spent = completion.usage.total_tokens # Cost of this api call
-        
-        labels.append(response_dict["label"])
-        confidences.append(response_dict["confidence"])
-        total_tokens += tokens_spent
-
-        if i % 10 == 0:
-            logs.info(f"{i}/{len(dataset)} QA-pairs annotated. Total tokens spent: {total_tokens}")
-
-    if save_results:
-        dataset[f"{model_name}_promptP2_labels"] = labels
-        dataset[f"{model_name}_promptP2_confs"] = confidences
-
-        output_filepath = f"{output_path}/data_{model_name}_labels.csv"
-        dataset.to_csv(output_filepath, index=False)
-        logs.info(f"Annotation ready. Cost: {total_tokens} tokens.")
-
-
 if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
     llama_3p1_8b = "meta-llama/Llama-3.1-8B-Instruct"
@@ -428,40 +212,17 @@ if __name__ == "__main__":
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
     gpt_oss_120b = "openai/gpt-oss-120b"
     gpt_5p4 = "gpt-5.4"
-    qwen3_72b_synthesis = "cognitivecomputations/Qwen3-72B-Synthesis"
-
-    # Model saved as gguf
-    qwen3_72b_instruct_gguf_model = "mradermacher/Qwen3-72B-Instruct-GGUF"
-    qwen3_72b_instruct_gguf_file = "Qwen3-72B-Instruct.Q4_K_M.gguf"
 
     # Bigger models
     llama_3_70b = "meta-llama/Meta-Llama-3-70B-Instruct" # Too large
-    qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B"
+    qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B" # Works
 
-    #annotate_data_with_openai(
-    #    dataset_path="datasets/triviaqa_2/data.csv",
-    #    prompt_path="prompts/labeling_problem_p2.txt",
-    #    output_path="datasets/triviaqa_2",
-    #    model_name=gpt_5p4,
-    #    save_results=True
-    #)
-
-    #annotate_data(
-    #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
-    #    prompt_path="prompts/valtteri_tree_model_v2.txt",
-    #    model_name=gemma_4_31b,
-    #    save_results=True
-    #)
-
-    #annotate_data_with_api(
-    #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
-    #    prompt_path="prompts/valtteri_tree_model_v2.txt",
-    #    model_name=qwen3_next_80b_a3b_instruct,
-    #    save_results=False
-    #)
+    nvidia_nemotron_3_super_120b = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4"
+    iquest_coder_v1_40b = "IQuestLab/IQuest-Coder-V1-40B-Instruct" 
+    
 
     generate_answers(
-        model_name=llama_3p1_8b,
+        model_name=gemma_4_31b,
         dataset_path="trivia_qa",
         output_path="datasets/triviaqa_filtered_samples",
         sample_size=20,
