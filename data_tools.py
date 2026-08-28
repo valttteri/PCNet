@@ -1,8 +1,11 @@
 import os
 import json
 import boto3
+import torch
 import pandas as pd
 import numpy as np
+from transformers import BitsAndBytesConfig
+from huggingface_hub import model_info, InferenceClient
 from datasets import load_dataset
 from datetime import datetime
 from dotenv import load_dotenv
@@ -10,6 +13,13 @@ from dotenv import load_dotenv
 from logger import Logger
 
 logs = Logger()
+
+BNB_CONFIG = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+)
 
 def create_data_subset(
     dataset_path:str,
@@ -95,19 +105,72 @@ def format_trivia_qa(df):
 
     return df
 
-def get_model_generation_kwargs(model_name:str=None, default:bool=False):
-    known_models = [
-        "Qwen/Qwen3.6-35B-A3B"
-    ]
-    if default:
-        return {
-            "max_new_tokens": 150,
-            "do_sample": True,
-            "temperature": 0.7,
-            "repetition_penalty": 1.1,
-            #"pad_token_id": tokenizer.eos_token_id # Comment out for gemma models
+def get_model_and_tokenizer_kwargs(model_name:str):
+
+    # Tokenizer kwargs
+    tokenizer_kwargs = {"trust_remote_code": True}
+    device = "cuda"
+
+    # Model kwargs
+    if "Hypernova" in model_name:
+        model_kwargs = {
+            "torch_dtype": "auto",
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+    else:
+        model_kwargs = {
+            "torch_dtype": torch.float16,
+            "device_map": device,
+            "trust_remote_code": True,
         }
 
+    # Chat template kwargs
+    if model_name == "Qwen/Qwen3.6-35B-A3B":
+        chat_template_kwargs = {
+            "tokenize": True,
+            "return_tensors": "pt",
+            "return_dict": True,          
+            "add_generation_prompt": True,
+            "enable_thinking": False 
+        }
+    #elif model_name == "IQuestLab/IQuest-Coder-V1-40B-Instruct":
+    #    chat_template_kwargs = {
+    #        "tokenize": True,
+    #        "return_tensors": "pt",
+    #        "return_dict": True,          
+    #        "add_generation_prompt": True,
+    #        "enable_thinking": False 
+    #    }
+    else:
+        chat_template_kwargs = {
+            "tokenize": True,
+            "return_tensors": "pt",
+            "return_dict": True,          
+            "add_generation_prompt": True 
+        }
+
+    if "nvidia" in model_name:
+        pass
+    else: 
+        model_kwargs["quantization_config"] = BNB_CONFIG
+
+    return model_kwargs, chat_template_kwargs, tokenizer_kwargs
+
+def get_model_generation_kwargs(
+    model_name:str=None,
+    tokenizer=None
+):
+    known_models = [
+        "Qwen/Qwen3.6-35B-A3B",
+        "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+        "MultiverseComputingCAI/Hypernova-60B-2605",
+        "meta-llama/Llama-3.1-8B-Instruct",
+        "meta-llama/Llama-3.2-1B-Instruct",
+        "google/gemma-4-31B-it",
+        "Qwen/Qwen3-Next-80B-A3B-Instruct"
+    ]
+        
     if model_name not in known_models:
         logs.error(f"{model_name} is unknown.")
         return None
@@ -121,10 +184,60 @@ def get_model_generation_kwargs(model_name:str=None, default:bool=False):
             "top_p": 0.8,
             "top_k": 20,
             "min_p": 0.0,
-            "precence_penalty": 1.5,
             "repetition_penalty": 1.0,
             "pad_token_id": tokenizer.eos_token_id
         }
+    
+    if model_name == "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4":
+        return {
+            "max_new_tokens": 150,
+            "do_sample": True,
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "repetition_penalty": 1.0,
+            "pad_token_id": tokenizer.eos_token_id
+        }
+    
+    # Default params for models not mentioned above
+    return {
+        "max_new_tokens": 150,
+        "do_sample": True,
+        "temperature": 0.7,
+        "repetition_penalty": 1.0,
+        "pad_token_id": tokenizer.eos_token_id # Comment out for gemma models
+    }
+
+def generate_bookkeeping(model_name, output_path, sample_size):
+    m_info = model_info(model_name)
+    commit_id = m_info.sha
+
+    date_today = datetime.now()
+    formatted_date = date_today.strftime("%d/%m/%Y")
+
+    prompt = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "<question>"},
+        {"role": "assistant", "content": ""}
+    ]
+
+    dataset_info = {
+        "name": "trivia_qa",
+        "subset": "rc.nocontext",
+        "split": f"validation"
+    }
+
+    log_entry = {
+        "model_name": model_name,
+        "model_sha": commit_id,
+        "dataset": dataset_info,
+        "sample_size": sample_size,
+        "date": formatted_date,
+        "source_code": "generate_with_models.py",
+        "prompt": prompt
+    }
+
+    with open(f"{output_path}/log_{identifier}.json", "w") as f:
+        json.dump(log_entry, f)
 
 """
             max_new_tokens=150,

@@ -12,6 +12,7 @@ comparisons
 evaluation_reports
 venv
 cpu_venv
+tf4_venv
 checkpoints
 idle.py
 setenv.sh
