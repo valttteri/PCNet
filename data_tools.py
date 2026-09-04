@@ -4,6 +4,7 @@ import boto3
 import torch
 import pandas as pd
 import numpy as np
+from sklearn.metrics import cohen_kappa_score
 from transformers import BitsAndBytesConfig
 from huggingface_hub import model_info, InferenceClient
 from datasets import load_dataset
@@ -20,6 +21,26 @@ BNB_CONFIG = BitsAndBytesConfig(
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
 )
+
+def annotation_label_metrics(dataset_path, col1_name, col2_name):
+    # Compute raw agreement and Cohen's kappa score between two annotation lable columns
+    logs.info("Computing metrics")
+    df = pd.read_csv(dataset_path)
+
+    matches, undefined = 0, 0
+    for i in range(len(df)):
+        if df.loc[i, col1_name] == "UD":
+            undefined += 1
+            continue
+
+        if df.loc[i, col1_name] == df.loc[i, col2_name]:
+            matches += 1
+
+    cohen_kappa = cohen_kappa_score(df.loc[:, col1_name], df.loc[:, col2_name])
+    logs.info(f"Raw agreement between {col1_name}, {col2_name}: {matches}/{len(df)-undefined}")
+    logs.info(f"Cohen's Kappa score: {cohen_kappa}")
+
+
 
 def create_data_subset(
     dataset_path:str,
@@ -106,7 +127,6 @@ def format_trivia_qa(df):
     return df
 
 def get_model_and_tokenizer_kwargs(model_name:str):
-
     # Tokenizer kwargs
     tokenizer_kwargs = {"trust_remote_code": True}
     device = "cuda"
@@ -116,6 +136,12 @@ def get_model_and_tokenizer_kwargs(model_name:str):
         model_kwargs = {
             "torch_dtype": "auto",
             "device_map": "auto",
+            "trust_remote_code": True,
+        }
+    elif "FP8" in model_name:
+        model_kwargs = {
+            "torch_dtype": torch.bfloat16,
+            "device_map": device,
             "trust_remote_code": True,
         }
     else:
@@ -134,14 +160,14 @@ def get_model_and_tokenizer_kwargs(model_name:str):
             "add_generation_prompt": True,
             "enable_thinking": False 
         }
-    #elif model_name == "IQuestLab/IQuest-Coder-V1-40B-Instruct":
-    #    chat_template_kwargs = {
-    #        "tokenize": True,
-    #        "return_tensors": "pt",
-    #        "return_dict": True,          
-    #        "add_generation_prompt": True,
-    #        "enable_thinking": False 
-    #    }
+    elif model_name == "IQuestLab/IQuest-Coder-V1-40B-Instruct":
+        chat_template_kwargs = {
+            "tokenize": True,
+            "return_tensors": "pt",
+            "return_dict": True,          
+            "add_generation_prompt": True,
+            "enable_thinking": False 
+        }
     else:
         chat_template_kwargs = {
             "tokenize": True,
@@ -150,16 +176,16 @@ def get_model_and_tokenizer_kwargs(model_name:str):
             "add_generation_prompt": True 
         }
 
-    if "nvidia" in model_name:
-        pass
-    else: 
+    # Models that are already quantized do not need the BNB_CONFIG
+    if not any(x in model_name for x in ["nvidia", "FP8"]): 
         model_kwargs["quantization_config"] = BNB_CONFIG
 
     return model_kwargs, chat_template_kwargs, tokenizer_kwargs
 
 def get_model_generation_kwargs(
     model_name:str=None,
-    tokenizer=None
+    tokenizer=None,
+    annotate:bool=False
 ):
     known_models = [
         "Qwen/Qwen3.6-35B-A3B",
@@ -168,17 +194,33 @@ def get_model_generation_kwargs(
         "meta-llama/Llama-3.1-8B-Instruct",
         "meta-llama/Llama-3.2-1B-Instruct",
         "google/gemma-4-31B-it",
-        "Qwen/Qwen3-Next-80B-A3B-Instruct"
+        "Qwen/Qwen3-Next-80B-A3B-Instruct",
+        "meta-llama/Meta-Llama-3-70B-Instruct",
+        "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8"
     ]
         
     if model_name not in known_models:
         logs.error(f"{model_name} is unknown.")
         return None
+    
+    max_new_tokens = 150
+    if annotate:
+        # Annotation might require more tokens than model answer generation
+        max_new_tokens = 400
+
+    if "gemma" in model_name:
+        model = {
+            "max_new_tokens": max_new_tokens, # For elaborations in annotation
+            "do_sample": True,
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 64,
+        }
 
     if model_name == "Qwen/Qwen3.6-35B-A3B":
         # Based on instruct mode params in huggingface
         return {
-            "max_new_tokens": 150,
+            "max_new_tokens": max_new_tokens,
             "do_sample": True,
             "temperature": 0.7,
             "top_p": 0.8,
@@ -190,7 +232,7 @@ def get_model_generation_kwargs(
     
     if model_name == "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4":
         return {
-            "max_new_tokens": 150,
+            "max_new_tokens": max_new_tokens,
             "do_sample": True,
             "temperature": 1.0,
             "top_p": 0.95,
@@ -200,14 +242,19 @@ def get_model_generation_kwargs(
     
     # Default params for models not mentioned above
     return {
-        "max_new_tokens": 150,
+        "max_new_tokens": max_new_tokens,
         "do_sample": True,
         "temperature": 0.7,
-        "repetition_penalty": 1.0,
+        "repetition_penalty": 1.1,
         "pad_token_id": tokenizer.eos_token_id # Comment out for gemma models
     }
 
-def generate_bookkeeping(model_name, output_path, sample_size):
+def generate_bookkeeping(
+    model_name:str,
+    output_path:str,
+    sample_size:int,
+    identifier:int | str,
+):
     m_info = model_info(model_name)
     commit_id = m_info.sha
 
@@ -236,19 +283,8 @@ def generate_bookkeeping(model_name, output_path, sample_size):
         "prompt": prompt
     }
 
-    with open(f"{output_path}/log_{identifier}.json", "w") as f:
+    with open(f"{output_path}/data{identifier}_size{sample_size}_log.json", "w") as f:
         json.dump(log_entry, f)
-
-"""
-            max_new_tokens=150,
-            do_sample=True,
-            temperature=0.7,
-            repetition_penalty=1.1,
-            pad_token_id=tokenizer.eos_token_id, # Comment out for gemma models
-        )
-
-        #top_p=0.80, top_k=20, min_p=0.0, presence_penalty=1.5, repetition_penalty=1.0
-"""
 
 if __name__ == "__main__":
     triviaqa_cols = [
@@ -260,12 +296,16 @@ if __name__ == "__main__":
     ]
 
     #format_answer_column(dataset_path="datasets/triviaqa_2/data.csv")
-    create_data_subset(
-        dataset_path="datasets/triviaqa_2/data.csv",
-        subset_size=50,
-        output_path="datasets/triviaqa_2/random_sample50.csv",
-        columns=triviaqa_cols,
-        format_answer_col=False
-    )
+    #create_data_subset(
+    #    dataset_path="datasets/triviaqa_2/data.csv",
+    #    subset_size=50,
+    #    output_path="datasets/triviaqa_2/random_sample50.csv",
+    #    columns=triviaqa_cols,
+    #    format_answer_col=False
+    #)
 
-    #count_column_values()
+    annotation_label_metrics(
+        dataset_path="datasets/triviaqa_filtered_samples/data1_size50_noreasoning_annotated.csv",
+        col1_name="human_annotation",
+        col2_name="gemma-4-31b-it_annotation"
+    )

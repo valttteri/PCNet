@@ -120,7 +120,6 @@ class HallucinationExperiment:
         return avg_nll, avg_entropy
 
     @torch.no_grad()
-    @torch.no_grad()
     def proposed_pcnet_guardrail(self, text, n_samples=100):
         self.guardrail.eval() 
         
@@ -157,6 +156,9 @@ class HallucinationExperiment:
         }
 
         for text, label in tqdm(dataset, desc="Evaluating"):
+            """
+            Skip all baselines
+
             # 1. Standard Token NLL & Token Entropy
             b_nll, b_entropy = self.baseline_token_likelihood_and_entropy(text) # <-- Capture both
             
@@ -186,12 +188,17 @@ class HallucinationExperiment:
                 # SOTA 4 & 5: AutoFact NLI & ChainPoll LLM Judge
                 autofact_score = self.autofact_baseline.score(context, answer)
                 chainpoll_score = self.chainpoll_baseline.score(context, answer)
-
+            """
             # 4. Proposed: PCNet Guardrail
             p_nll, p_unc = self.proposed_pcnet_guardrail(text, n_samples=20)
             
-            # Store ALL results
+            # Delete: Only store labels and PCNet scores
             results["labels"].append(label)
+            results["proposed_latent_nll"].append(p_nll)
+            results["proposed_epistemic_unc"].append(p_unc)
+            """
+            Skip baselines
+            # Store ALL results
             results["baseline_nll"].append(b_nll)
             results["baseline_entropy"].append(b_entropy)
             results["sota_semantic_entropy"].append(sem_entropy)
@@ -202,6 +209,7 @@ class HallucinationExperiment:
             results["sota_autofact_nli"].append(autofact_score)
             results["sota_chainpoll_judgement"].append(chainpoll_score)
             results["sota_sep"].append(sep_score)
+            """
 
         return self._compute_metrics(results, dataset_name, llm_name)
 
@@ -215,17 +223,23 @@ class HallucinationExperiment:
         metrics_summary = {}
         
         score_dict = {
-            "Baseline: Token NLL": np.array(results["baseline_nll"]),
-            "Baseline: Token Entropy": np.array(results["baseline_entropy"]),
-            "SOTA: Semantic Entropy": np.array(results["sota_semantic_entropy"]),
-            "SOTA: Latent MLP Probe": np.array(results["sota_mlp_latent"]),
-            "SOTA: HaloScope Recon Error": np.array(results["sota_haloscope_latent"]),
-            "SOTA: AutoFact NLI Contradict": np.array(results["sota_autofact_nli"]),
-            "SOTA: ChainPoll LLM Judge": np.array(results["sota_chainpoll_judgement"]),
-            "SOTA: SEP (Semantic Entropy Probe)": np.array(results["sota_sep"]),
             "Proposed: PCNet Latent NLL": np.array(results["proposed_latent_nll"]),
             "Proposed: PCNet Epistemic Unc": np.array(results["proposed_epistemic_unc"])
         }
+
+        # Skip baseline metrics
+        #score_dict = {
+        #    "Baseline: Token NLL": np.array(results["baseline_nll"]),
+        #    "Baseline: Token Entropy": np.array(results["baseline_entropy"]),
+        #    "SOTA: Semantic Entropy": np.array(results["sota_semantic_entropy"]),
+        #    "SOTA: Latent MLP Probe": np.array(results["sota_mlp_latent"]),
+        #    "SOTA: HaloScope Recon Error": np.array(results["sota_haloscope_latent"]),
+        #    "SOTA: AutoFact NLI Contradict": np.array(results["sota_autofact_nli"]),
+        #    "SOTA: ChainPoll LLM Judge": np.array(results["sota_chainpoll_judgement"]),
+        #    "SOTA: SEP (Semantic Entropy Probe)": np.array(results["sota_sep"]),
+        #    "Proposed: PCNet Latent NLL": np.array(results["proposed_latent_nll"]),
+        #    "Proposed: PCNet Epistemic Unc": np.array(results["proposed_epistemic_unc"])
+        #}
         
         metrics_summary["Experiment_Info"] = {
             "dataset": dataset_name,

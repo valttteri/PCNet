@@ -89,15 +89,6 @@ def generate_answers(
     model_kwargs, chat_template_kwargs, tokenizer_kwargs = get_model_and_tokenizer_kwargs(model_name=model_name)
 
     # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
-    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
-    eos_tokens = model.generation_config.eos_token_id
-
-    if len(eos_tokens) == 0:
-        logs.error("No EOS Tokens found")
-        return
-    logs.info(f"eos tokens: {eos_tokens}")
-
     if "gemma" in model_name:
         tokenizer = AutoProcessor.from_pretrained(model_name)
         model = AutoModelForMultimodalLM.from_pretrained(
@@ -105,7 +96,17 @@ def generate_answers(
             dtype="auto",
             device_map="auto"
         )
+    else:
+        # Non-gemma models
+        tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
+        model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+
     logs.info(f"Loaded model {model_name}")
+    eos_tokens = model.generation_config.eos_token_id
+    if len(eos_tokens) == 0:
+        logs.error("No EOS Tokens found")
+        return
+    logs.info(f"eos tokens: {eos_tokens}")    
 
     # Local csv file
     if dataset_path.endswith(".csv"):
@@ -128,11 +129,11 @@ def generate_answers(
 
     # Generate an answer for each question
     for i, q in enumerate(questions):
-        logs.info(f"Iteration number {i+1}")
+        #logs.info(f"Iteration number {i+1}")
         if sum(is_completed) == sample_size:
             logs.info(f"{sum(is_completed)} complete answers generated after {len(is_completed)} iterations")
             break
-        if len(answers) == 20 and sum(is_completed) <= 5:
+        if len(answers) == 10 and sum(is_completed) <= 3:
             logs.info(f"Model is producing mostly incomplete answers: {len(answers)} anwers, {sum(is_completed)} complete")
             break
 
@@ -150,7 +151,8 @@ def generate_answers(
         # Get model-specific generation args
         generation_kwargs = get_model_generation_kwargs(
             model_name=model_name,
-            tokenizer=tokenizer
+            tokenizer=tokenizer,
+            annotate=False
         )
         # Generate tokens
         output_tokens = model.generate(
@@ -168,7 +170,7 @@ def generate_answers(
             is_completed.append(0)
         answers.append(answer)
         
-        if (i+1) % 5 == 0:
+        if (i+1) % 10 == 0:
             print(f"{i+1} Answers generated, {sum(is_completed)} are complete")
 
     # The subset of data we want
@@ -184,36 +186,39 @@ def generate_answers(
     # Save the generated answers and a log entry
     if save_results:
         logs.info(f"Dataset length before filtering: {len(data_subset)}")
-        data_subset.loc[:, "gen_answer"] = answers
+
+        safe_model_name = model_name.replace("/", "_")
+        
+        data_subset.loc[:, f"gen_answer_{safe_model_name}"] = answers
         data_subset.loc[:, "is_complete"] = is_completed
         
         # Drop all rows that contain an incomplete answer
         data_subset = data_subset[data_subset["is_complete"] == 1]
         data_subset = data_subset.drop(columns=["is_complete"])
 
+        path_to_results = f"{output_path}/data{identifier}_size{sample_size}.csv"
+
         logs.info(f"Dataset length after filtering: {len(data_subset)}")
 
-        return
-
-        data_subset.to_csv(f"{output_path}/sample_{identifier}_size{sample_size}.csv", index=False)
-    
+        data_subset.to_csv(f"{output_path}/data{identifier}_size{sample_size}.csv", index=False)    
         generate_bookkeeping(
             model_name=model_name,
             output_path=output_path,
             sample_size=sample_size,
             identifier=identifier
         )
+        logs.info(f"Saved results to: {path_to_results}")
 
 if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
     llama_3p1_8b = "meta-llama/Llama-3.1-8B-Instruct"
     gemma_4_31b = "google/gemma-4-31B-it" # Try in Roihu
-    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
     gpt_oss_120b = "openai/gpt-oss-120b"
     gpt_5p4 = "gpt-5.4"
 
     # Bigger models
+    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     llama_3_70b = "meta-llama/Meta-Llama-3-70B-Instruct" # Too large
     qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B" # Works
 
@@ -222,11 +227,12 @@ if __name__ == "__main__":
     
 
     generate_answers(
-        model_name=gemma_4_31b,
+        model_name=llama_3p1_8b,
         dataset_path="trivia_qa",
-        output_path="datasets/triviaqa_filtered_samples",
-        sample_size=20,
-        identifier=1,
+        #output_path="datasets/triviaqa_filtered_samples",
+        output_path="datasets/misc",
+        sample_size=1,
+        identifier=2,
         gguf_file=None,
         verbose=True,
         save_results=True

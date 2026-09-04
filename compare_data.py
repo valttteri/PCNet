@@ -219,20 +219,22 @@ if __name__ == "__main__":
     #    df3_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed44.csv"
     #)
     
-    weights = "coqa"
-    datasets = ["coqa", "truthful_qa"]
+    weights = "truthfulqa" # PCnet weights
+    datasets = ["trivia_qa"] # Eval datasets
+    model = "meta-llama_Llama-3.2-1B-Instruct" 
     seeds = [42, 43, 44]
 
     for ds in datasets:
         json_file_paths = [
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[0]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[0]}/metrics.json",
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[1]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[1]}/metrics.json",
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[2]}/Qwen_Qwen3-4B-Instruct-2507/{ds}/{seeds[2]}/metrics.json"
+            f"all_logs/pcnet_detection_logs_ztest/{weights}_weights/PCNet_Guardrail/{seeds[0]}/{model}/{ds}/{seeds[0]}/metrics.json",
+            f"all_logs/pcnet_detection_logs_ztest/{weights}_weights/PCNet_Guardrail/{seeds[1]}/{model}/{ds}/{seeds[1]}/metrics.json",
+            f"all_logs/pcnet_detection_logs_ztest/{weights}_weights/PCNet_Guardrail/{seeds[2]}/{model}/{ds}/{seeds[2]}/metrics.json",
         ]
-
         average_of_json_files(
             file_paths=json_file_paths,
-            model_name="Qwen_Qwen3-4B-Instruct-2507",
+            model_name=model,
             dataset_name=ds,
-            output_path=f"comparisons/pcnet_exp1_main_py_results/{weights}_pcnet_weights",
+            output_path=f"comparisons/pcnet_faster_results/{weights}_weights"
         )
+        
+        "comparisons/pcnet_faster_results/coqa_weights/meta-llama_Llama-3.2-1B-Instruct_trivia_qa.json"

@@ -14,6 +14,9 @@ from baselines import LatentMLPProbe
 # We import the dataloader module itself so we can forcefully reload it later
 import hf_dataloader
 
+from logger import Logger
+logs = Logger()
+
 # ==========================================
 # 1. Memory Management
 # ==========================================
@@ -48,7 +51,8 @@ def main():
     max_train_samples = config.get("max_train_samples", 500)
     #max_samples = config.get("max_samples", None)
 
-    # Limit max saples to 1000 to avoid
+    # Limit max saples to 1000 to avoid computational overhead
+    # Delete: changed max_samples
     max_samples = 1000
     
     batch_size = config.get("batch_size", 8)
@@ -62,12 +66,8 @@ def main():
     # Change/delete: run with only specific datasets
     datasets = [
         {
-            "name": "coqa",
-            "subset": None
-        },
-        {
-            "name": "truthful_qa",
-            "subset": "generation"
+            "name": "trivia_qa",
+            "subset": "rc.nocontext"
         }
     ]
 
@@ -132,9 +132,15 @@ def main():
 
             # Change/delete: The folder where metrics are saved 
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_truthfulqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_triviaqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            
+            # Testing folder
+            log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/squad_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
@@ -149,8 +155,8 @@ def main():
             # --- Dynamic Weight Loading ---
 
             # Change/delete: use same PCNet weights for each dataset
-            #safe_ds_str = "truthful_qa"
-            safe_ds_str = "rajpurkar_squad_v2"
+            safe_ds_str = "truthful_qa"
+            #safe_ds_str = "rajpurkar_squad_v2"
             #safe_ds_str = "trivia_qa"
             #safe_ds_str = "coqa"
 
@@ -219,22 +225,27 @@ def main():
 
                 if raw_train_embeddings:
                     raw_train_embeddings = torch.cat(raw_train_embeddings, dim=0)
-                    experiment.fit_haloscope(raw_train_embeddings)
+                    # Delete: skip fitting haloscope
+                    #experiment.fit_haloscope(raw_train_embeddings)
 
                     # SEP: fit linear probe (hidden state -> semantic entropy).
                     n_sep = config.get("sep_train_samples", min(60, len(wild_mixture)))
                     sep_texts = wild_mixture[:n_sep]
                     sep_embs = raw_train_embeddings[:n_sep]
                     print(f"  🧪 Fitting SEP on {n_sep} samples (computing semantic-entropy targets)...")
-                    se_targets = experiment.compute_semantic_entropy_for_fit(
-                        sep_texts,
-                        num_samples=config.get("sep_se_samples", 5),
-                        max_new_tokens=config.get("sep_se_max_new_tokens", 40),
-                    )
-                    experiment.fit_sep(sep_embs, se_targets)
+                    # Delete: uncomment se_targets
+                    #se_targets = experiment.compute_semantic_entropy_for_fit(
+                    #    sep_texts,
+                    #    num_samples=config.get("sep_se_samples", 5),
+                    #    max_new_tokens=config.get("sep_se_max_new_tokens", 40),
+                    #)
+                    #experiment.fit_sep(sep_embs, se_targets)
             
             metrics = experiment.run_benchmark(dataset, dataset_name=ds_key, llm_name=llm_name)
             master_metrics[llm_name][ds_key] = metrics
+
+            #print("Main.py halting")
+            #return
             
             os.makedirs(log_dir, exist_ok=True)
             with open(metrics_path, "w") as f:
@@ -256,10 +267,13 @@ def main():
     # Final Save
     os.makedirs("logs", exist_ok=True)
     summary_filename = "unsup_master_benchmark_summary.json" if is_unsup else "master_benchmark_summary.json"
-    summary_path = os.path.join("all_logs/pcnet_detection_logs2", summary_filename)
-    
-    with open(summary_path, "w") as f:
-        json.dump(master_metrics, f, indent=4)
+    summary_path = os.path.join("all_logs/pcnet_detection_logs_z", summary_filename)
+
+    try:
+        with open(summary_path, "w") as f:
+            json.dump(master_metrics, f, indent=4)
+    except FileNotFoundError:
+        logs.error(f"Master summary path not found. (Does not matter)")
         
     print(f"\n🎉 ALL BENCHMARKS COMPLETE. Summary saved to {summary_path}")
 

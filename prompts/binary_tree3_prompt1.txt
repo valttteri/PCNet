@@ -21,7 +21,7 @@ OUTPUT FORMAT
 Your output must contain exactly two things:
     1. Concise reasoning for each step that you decide to take in the
     decision tree.
-    2. The label you give for the model answer.
+    2. The label you chose for the model answer.
 DO NOT output anything else.
 
 DECISION TREE
