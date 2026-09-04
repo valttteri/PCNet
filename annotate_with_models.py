@@ -12,7 +12,12 @@ from dotenv import load_dotenv
 from tabulate import tabulate
 
 from logger import Logger
-from data_tools import format_trivia_qa, get_model_generation_kwargs, generate_bookkeeping
+from data_tools import (
+    format_trivia_qa,
+    get_model_generation_kwargs,
+    get_model_and_tokenizer_kwargs,
+    generate_bookkeeping
+)
 
 load_dotenv()
 logs = Logger()
@@ -80,29 +85,46 @@ def annotate_data_with_api(
 
 def annotate_data(
     dataset_path:str,
-    prompt_path:str,
-    model_name:str,
-    save_results=False
+    prompt_name:str,
+    annotator_model_name:str,
+    generator_model_name:str,
+    verbose:bool=False,
+    save_results:bool=False
 ):
+    # Release unoccupied cached memory 
+    torch.cuda.empty_cache()
+
+    prompt_path = f"prompts/{prompt_name}.txt"
     with open(prompt_path, "r") as f:
         prompt = f.read()
 
     # Local dataset    
-    dataset = pd.read_csv(dataset_path)
+    dataset = pd.read_csv(f"{dataset_path}.csv")
     device = "cuda"
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, 
-        quantization_config=BNB_CONFIG,
-        torch_dtype=torch.float16,
-        device_map=device,
-        trust_remote_code=True
-    )
+    model_kwargs, chat_template_kwargs, tokenizer_kwargs = get_model_and_tokenizer_kwargs(model_name=annotator_model_name)
+
+    if "gemma" in annotator_model_name:
+        tokenizer = AutoProcessor.from_pretrained(annotator_model_name)
+        model = AutoModelForMultimodalLM.from_pretrained(
+            annotator_model_name,
+            dtype="auto",
+            device_map="auto"
+        )
+    else:
+        # Non-gemma models
+        tokenizer = AutoTokenizer.from_pretrained(annotator_model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(annotator_model_name, **model_kwargs)
+
+    logs.info(f"Loaded model {annotator_model_name}")
 
     questions = dataset["question"]
     ref_answers = dataset["answer"]
-    model_answers = dataset["gen_answer"]
+
+    #Example col name: gen_answer_meta-llama_Llama-3.1-8B-Instruct
+    safe_gen_model_name = generator_model_name.replace("/", "_")
+    gen_answer_col_name = f"gen_answer_{safe_gen_model_name}"
+    model_answers = dataset[gen_answer_col_name]
 
     labels = []
 
@@ -114,21 +136,24 @@ def annotate_data(
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": ""}
         ]
+
+        # Tokenize the input
         tokenized_input = tokenizer.apply_chat_template(
             messages,
-            tokenize=True,
-            return_tensors="pt",
-            return_dict=True,          
-            add_generation_prompt=True 
+            **chat_template_kwargs
         ).to(device)                   
 
+        # Get model-specific generation args
+        generation_kwargs = get_model_generation_kwargs(
+            model_name=annotator_model_name,
+            tokenizer=tokenizer,
+            annotate=True
+        )
+
+        # Generate tokens
         output_tokens = model.generate(
             **tokenized_input,
-            max_new_tokens=150,
-            do_sample=True,
-            temperature=0.7,
-            repetition_penalty=1.1,
-            pad_token_id=tokenizer.eos_token_id # Comment out for gemma models
+            **generation_kwargs
         )
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
@@ -139,10 +164,30 @@ def annotate_data(
 
         labels.append(answer)
 
+        # Cutoff for testing
+        if i == 3:
+            break
+
+    if verbose:
+        logs.info("#####################")
+        logs.info(f"Total of {len(labels)} QA-pairs annotated. Results:\n")
+        for i, a in enumerate(labels):
+            logs.info("#####################")
+            logs.info(f"Question {i}: {questions.iloc[i]}\n")
+            logs.info(f"Model answer {i}: {ref_answers.iloc[i]}\n")
+            logs.info(f"Annotator: {a}\n")
+
+    if dataset_path.endswith("annotated"):
+        result_path = f"{dataset_path}.csv"
+    else:
+        result_path = f"{dataset_path}_annotated.csv"
+
     if save_results:
-        dataset[f"{model_name}_valtteriV2"] = labels
-        dataset.to_csv(dataset_path, index=False)
-        logs.info("Annotation ready.")
+        annotated_dataset = dataset.copy()
+        annotated_dataset[f"{annotator_model_name}_{prompt_name}"] = labels
+
+        annotated_dataset.to_csv(result_path, index=False)
+        logs.info(f"Results saved to: {result_path}")
 
 def annotate_data_with_openai(
     dataset_path:str,
@@ -202,17 +247,28 @@ if __name__ == "__main__":
     llama_3p2_1b = "meta-llama/Llama-3.2-1B-Instruct"
     llama_3p1_8b = "meta-llama/Llama-3.1-8B-Instruct"
     gemma_4_31b = "google/gemma-4-31B-it" # Try in Roihu
-    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
     gpt_oss_120b = "openai/gpt-oss-120b"
     gpt_5p4 = "gpt-5.4"
 
     # Bigger models
+    qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
+    qwen3_next_80b_a3b_instruct_fp8 = "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8"
     llama_3_70b = "meta-llama/Meta-Llama-3-70B-Instruct" # Too large
     qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B" # Works
 
     hypernova_60B = "MultiverseComputingCAI/Hypernova-60B-2605"
     nemotron_3_super_120b = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4" 
+
+    # Remember to exclude .csv from dataset_path when annotating data
+    annotate_data(
+        dataset_path="datasets/triviaqa_filtered_samples/data1_size50",
+        prompt_name="binary_tree3_prompt1",
+        annotator_model_name=qwen3_next_80b_a3b_instruct_fp8,
+        generator_model_name=llama_3p1_8b,
+        verbose=True,
+        save_results=False
+    )
     
     #annotate_data_with_openai(
     #    dataset_path="datasets/triviaqa_2/data.csv",
@@ -220,14 +276,7 @@ if __name__ == "__main__":
     #    output_path="datasets/triviaqa_2",
     #    model_name=gpt_5p4,
     #    save_results=True
-    #)
-
-    #annotate_data(
-    #    dataset_path="datasets/triviaqa_1/random_sample20.csv",
-    #    prompt_path="prompts/valtteri_tree_model_v2.txt",
-    #    model_name=gemma_4_31b,
-    #    save_results=True
-    #)
+    #) 
 
     #annotate_data_with_api(
     #    dataset_path="datasets/triviaqa_1/random_sample20.csv",

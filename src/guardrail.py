@@ -3,6 +3,9 @@ import torch.nn as nn
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 from probabilistic_circuits import *
+from logger import Logger
+
+logs = Logger()
 
 class LLM_PC_Guardrail(nn.Module):
     def __init__(self, llm_model_name, pc_in_channels=128, pc_depth=3, device="cuda"):
@@ -51,6 +54,8 @@ class LLM_PC_Guardrail(nn.Module):
             max_branching=3, 
             seed=42
         ).to(self.device)
+        # Delete: reduce computational overhead with torch.compile
+        self.pc_prior = torch.compile(self.pc_prior, mode="reduce-overhead")
         
         self.pc_in_channels = pc_in_channels
 
@@ -101,17 +106,83 @@ class LLM_PC_Guardrail(nn.Module):
     def forward(self, texts, mpe_training=False, n_samples=1):
         """
         Evaluates the anomaly score (Negative Log-Likelihood) of the given texts.
-        If n_samples > 1, applies MC Dropout to calculate Epistemic Uncertainty.
+        If n_samples > 1, applies MC (Monte Carlo) Dropout to calculate Epistemic Uncertainty.
         """
         if self.training:
             embeddings = self._get_llm_embeddings(texts)
             embeddings_spatial = embeddings.unsqueeze(-1).unsqueeze(-1)
             log_prob = self.pc_prior(embeddings_spatial)
             return log_prob # Shape: (B, 1, 1, 1)
-        else:
+        else:            
+            # Created with ChatGPT
+            """
+            Pipeline:
+            1. Create an array with n_samples * base_embeddings in a row (expanded)
+            2. Drop 10% of the embeddings (dropped_embs)
+            3. Reshape dropped embs
+            4. Reshape dropped_embs again to form emb_spatial. This is required by PCNet 
+            5. Obtain log-likelihood (becomes NLL later), and variance
+            """
+
             with torch.no_grad():
                 base_embeddings = self._get_llm_embeddings(texts)
-                
+
+                if n_samples == 1:
+                    embeddings_spatial = base_embeddings.unsqueeze(-1).unsqueeze(-1)
+                    log_prob = self.pc_prior(embeddings_spatial)
+                    return log_prob
+
+                # B, D = 1, 128
+                B, D = base_embeddings.shape
+
+                # Generate all MC-dropout samples at once
+                # Shape: (N, B, D), if n_samples=5, then shape=(3, 1, 128)
+                expanded = base_embeddings.unsqueeze(0).expand(n_samples, -1, -1)
+
+                # dropped_embs shape: (n_samples, 1, 128)
+                dropped_embs = torch.nn.functional.dropout(
+                    expanded,
+                    p=0.1,
+                    training=True,
+                )
+
+                # Flatten MC dimension into batch dimension
+                # Shape: (N * B, D)
+                # dropped_embs shape reshaped: (n_samples, 128)                
+                dropped_embs = dropped_embs.reshape(n_samples * B, D)
+
+                # Add spatial dimensions
+                # Shape: (N * B, D, 1, 1)
+                # emb_spatial shape: (n_samples, 128, 1, 1)
+                emb_spatial = dropped_embs.unsqueeze(-1).unsqueeze(-1)
+
+                # One pc_prior call instead of N calls
+                # log_probs shape: (n_samples, 1, 1, 1, 1)
+                log_probs = self.pc_prior(emb_spatial)
+
+                # Restore MC dimension
+                # Shape: (N, B, ...)
+                # log_probs shape: (n_samples, 1, 1, 1, 1, 1)
+                log_probs = log_probs.reshape(n_samples, B, *log_probs.shape[1:])
+
+                # MC mean and variance
+                mean_log_prob = log_probs.mean(dim=0)
+                variance = log_probs.var(dim=0)
+
+                self.pc_prior._last_var = variance
+
+                return mean_log_prob
+
+
+"""
+Original code:
+
+            with torch.no_grad():
+                # base_embeddings.shape = (1, 128)
+                base_embeddings = self._get_llm_embeddings(texts)
+                logs.info(f"base_embeddings shape: {base_embeddings.shape}")
+                logs.info(f"embeddings: {base_embeddings}")
+
             if n_samples == 1:
                 # Standard deterministic forward pass
                 embeddings_spatial = base_embeddings.unsqueeze(-1).unsqueeze(-1)
@@ -123,11 +194,18 @@ class LLM_PC_Guardrail(nn.Module):
                 for _ in range(n_samples):
                     # Force 10% dropout ON even in eval mode to simulate model doubt
                     dropped_embs = torch.nn.functional.dropout(base_embeddings, p=0.1, training=True)
+                    logs.info(f"dropped_embs shape {dropped_embs.shape}")
+                    logs.info(f"dropped_embs: {dropped_embs}")
+
                     emb_spatial = dropped_embs.unsqueeze(-1).unsqueeze(-1)
+                    logs.info(f"emb_spatial shape {emb_spatial.shape}")
+                    logs.info(f"emb_spatial: {emb_spatial}")
                     mc_log_probs.append(self.pc_prior(emb_spatial))
                 
                 # Stack results: (n_samples, Batch, ...)
                 stacked_probs = torch.stack(mc_log_probs)
+                logs.info(f"stacked_probs shape {stacked_probs.shape}")
+                logs.info(f"stacked_probs: {stacked_probs}")
                 mean_log_prob = stacked_probs.mean(dim=0)
                 variance = stacked_probs.var(dim=0)
                 
@@ -135,3 +213,5 @@ class LLM_PC_Guardrail(nn.Module):
                 self.pc_prior._last_var = variance
                 
                 return mean_log_prob
+
+            """
