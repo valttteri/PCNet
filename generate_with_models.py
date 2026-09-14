@@ -161,7 +161,7 @@ def generate_answers(
         )
 
         new_tokens = output_tokens[0][tokenized_input["input_ids"].shape[-1]:]
-        answer = tokenizer.decode(new_tokens, skip_special_tokens=False)
+        answer = tokenizer.decode(new_tokens, skip_special_tokens=True)
 
         # Generated answers ends in an eos token
         if new_tokens[-1] in eos_tokens:
@@ -227,14 +227,13 @@ if __name__ == "__main__":
     
 
     generate_answers(
-        model_name=llama_3p1_8b,
+        model_name=gemma_4_31b,
         dataset_path="trivia_qa",
-        #output_path="datasets/triviaqa_filtered_samples",
-        output_path="datasets/misc",
-        sample_size=1,
-        identifier=2,
+        output_path="datasets/sanity_check",
+        sample_size=70,
+        identifier=1,
         gguf_file=None,
-        verbose=True,
+        verbose=False,
         save_results=True
     )
 

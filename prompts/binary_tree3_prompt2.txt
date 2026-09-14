@@ -21,11 +21,16 @@ DEFINITIONS
     elaboration.
 
 OUTPUT FORMAT
-Your output must contain exactly two things:
-    1. Concise reasoning for each step that you decide to take in the
-    decision tree.
-    2. The label you chose for the model answer.
-DO NOT output anything else.
+Your output MUST BE strict JSON with exactly these two fields:
+
+{
+    "reasoning": <Concise reasoning for each step that you decide to take in the decision tree.>,
+    "label": <The label you chose for the model answer.>
+}
+
+Rules:
+- DO NOT include markdown, code fences, or extra text.
+
 
 DECISION TREE
 Q1: Did the model refuse to answer the question?
