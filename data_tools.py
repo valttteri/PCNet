@@ -2,6 +2,7 @@ import os
 import json
 import boto3
 import torch
+import ast
 import pandas as pd
 import numpy as np
 from sklearn.metrics import cohen_kappa_score
@@ -27,17 +28,42 @@ def annotation_label_metrics(dataset_path, col1_name, col2_name):
     logs.info("Computing metrics")
     df = pd.read_csv(dataset_path)
 
-    matches, undefined = 0, 0
+    col1_labels, col2_labels = [], []
+
+    raw_matches, pos_neg_matches, undefined = 0, 0, 0
     for i in range(len(df)):
-        if df.loc[i, col1_name] == "UD":
+        if col1_name == "human_annotation":
+            col1_label = df.loc[i, col1_name]
+        else:
+            col1_dict = ast.literal_eval(df.loc[i, col1_name])
+            col1_label = col1_dict["label"]
+            
+        if col2_name == "human_annotation":
+            col2_label = df.loc[i, col2_name]
+        else:
+            col2_dict = ast.literal_eval(df.loc[i, col2_name])
+            col2_label = col2_dict["label"]
+
+
+
+        if col1_label == "UD":
             undefined += 1
             continue
 
-        if df.loc[i, col1_name] == df.loc[i, col2_name]:
-            matches += 1
+        # Matching labels
+        if col1_label == col2_label:
+            raw_matches += 1
 
-    cohen_kappa = cohen_kappa_score(df.loc[:, col1_name], df.loc[:, col2_name])
-    logs.info(f"Raw agreement between {col1_name}, {col2_name}: {matches}/{len(df)-undefined}")
+        # Both labels are either pos or neg
+        if col1_label[:3] == col2_label[:3]:
+            pos_neg_matches += 1
+
+        col1_labels.append(col1_label)
+        col2_labels.append(col2_label)
+
+    cohen_kappa = cohen_kappa_score(col1_labels, col2_labels)
+    logs.info(f"Raw agreement between {col1_name}, {col2_name}: {raw_matches}/{len(df)-undefined}")
+    logs.info(f"Pos/neg matches between {col1_name}, {col2_name}: {pos_neg_matches}/{len(df)-undefined}")
     logs.info(f"Cohen's Kappa score: {cohen_kappa}")
 
 
@@ -196,7 +222,8 @@ def get_model_generation_kwargs(
         "google/gemma-4-31B-it",
         "Qwen/Qwen3-Next-80B-A3B-Instruct",
         "meta-llama/Meta-Llama-3-70B-Instruct",
-        "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8"
+        "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
+        "google/gemma-4-26B-A4B-it"
     ]
         
     if model_name not in known_models:
@@ -206,10 +233,10 @@ def get_model_generation_kwargs(
     max_new_tokens = 150
     if annotate:
         # Annotation might require more tokens than model answer generation
-        max_new_tokens = 400
+        max_new_tokens = 1000
 
     if "gemma" in model_name:
-        model = {
+        return {
             "max_new_tokens": max_new_tokens, # For elaborations in annotation
             "do_sample": True,
             "temperature": 1.0,
@@ -295,6 +322,14 @@ if __name__ == "__main__":
         "gen_answer"
     ]
 
+    # Column names in csv file
+    human = "human_annotation"
+    gemma4_31b_prompt3 = "google/gemma-4-31B-it_binary_tree3_prompt3"
+    gemma4_26b_prompt3 = "google/gemma-4-26B-A4B-it_binary_tree3_prompt3"
+    qwen3_next_80b_prompt3 = "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8_binary_tree3_prompt3"
+    gpt_6_astra = "gpt-6-astra_binary_tree3_prompt3"
+    gpt_5p6_sol = "gpt-5.6-sol_binary_tree3_prompt4"
+
     #format_answer_column(dataset_path="datasets/triviaqa_2/data.csv")
     #create_data_subset(
     #    dataset_path="datasets/triviaqa_2/data.csv",
@@ -305,7 +340,7 @@ if __name__ == "__main__":
     #)
 
     annotation_label_metrics(
-        dataset_path="datasets/triviaqa_filtered_samples/data1_size50_noreasoning_annotated.csv",
-        col1_name="human_annotation",
-        col2_name="gemma-4-31b-it_annotation"
+        dataset_path="datasets/sanity_check/data1_size70_annotated.csv",
+        col1_name=human,
+        col2_name=gpt_5p6_sol
     )

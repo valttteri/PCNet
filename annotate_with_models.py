@@ -164,10 +164,6 @@ def annotate_data(
 
         labels.append(answer)
 
-        # Cutoff for testing
-        if i == 3:
-            break
-
     if verbose:
         logs.info("#####################")
         logs.info(f"Total of {len(labels)} QA-pairs annotated. Results:\n")
@@ -191,23 +187,28 @@ def annotate_data(
 
 def annotate_data_with_openai(
     dataset_path:str,
-    prompt_path:str,
-    output_path:str,
-    model_name:str,
+    prompt_name:str,
+    annotator_model_name:str,
+    generator_model_name:str,
     save_results=False
 ):
     client = OpenAI()
-    dataset = pd.read_csv(dataset_path)
+    dataset = pd.read_csv(f"{dataset_path}.csv")
 
+    prompt_path = f"prompts/{prompt_name}.txt"
     with open(prompt_path, "r") as f:
         prompt = f.read()
 
     questions = dataset["question"]
     ref_answers = dataset["answer"]
-    model_answers = dataset["gen_answer"]
+
+    #Example col name: gen_answer_meta-llama_Llama-3.1-8B-Instruct
+    safe_gen_model_name = generator_model_name.replace("/", "_")
+    gen_answer_col_name = f"gen_answer_{safe_gen_model_name}"
+    model_answers = dataset[gen_answer_col_name]
 
     labels = []
-    confidences = []
+    #confidences = []
     total_tokens = 0
 
     # Create a chatbot using ChatCompletion.create() function
@@ -215,7 +216,7 @@ def annotate_data_with_openai(
 
         user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
         completion = client.chat.completions.create(
-          model=model_name,
+          model=annotator_model_name,
           messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_input},
@@ -224,23 +225,32 @@ def annotate_data_with_openai(
         )
 
         response = completion.choices[0].message.content 
-        response_dict = ast.literal_eval(response) # Label and confidence decided by model, as Python dict
+        #response_dict = ast.literal_eval(response) # Label and confidence decided by model, as Python dict
         tokens_spent = completion.usage.total_tokens # Cost of this api call
         
-        labels.append(response_dict["label"])
-        confidences.append(response_dict["confidence"])
+        labels.append(response)
         total_tokens += tokens_spent
 
-        if i % 10 == 0:
-            logs.info(f"{i}/{len(dataset)} QA-pairs annotated. Total tokens spent: {total_tokens}")
+        #labels.append(response_dict["label"])
+        #confidences.append(response_dict["confidence"])
+        
+        if i % 5 == 0:
+            logs.info(f"{i}/{len(dataset)} QA-pairs annotated. Cost so far: {total_tokens} tokens.")
+
+    if dataset_path.endswith("annotated"):
+        result_path = f"{dataset_path}.csv"
+    else:
+        result_path = f"{dataset_path}_annotated.csv"
 
     if save_results:
-        dataset[f"{model_name}_promptP2_labels"] = labels
-        dataset[f"{model_name}_promptP2_confs"] = confidences
+        annotated_dataset = dataset.copy()
+        annotated_dataset[f"{annotator_model_name}_{prompt_name}"] = labels
 
-        output_filepath = f"{output_path}/data_{model_name}_labels.csv"
-        dataset.to_csv(output_filepath, index=False)
-        logs.info(f"Annotation ready. Cost: {total_tokens} tokens.")
+        annotated_dataset.to_csv(result_path, index=False)
+        logs.info(f"Results saved to: {result_path}")
+    
+    logs.info(f"Annotation ready. Total cost: {total_tokens} tokens.")
+
 
 
 if __name__ == "__main__":
@@ -250,6 +260,8 @@ if __name__ == "__main__":
     gpt_oss_safeguard_120b = "openai/gpt-oss-safeguard-120b"
     gpt_oss_120b = "openai/gpt-oss-120b"
     gpt_5p4 = "gpt-5.4"
+    gpt_5p6_sol = "gpt-5.6-sol"
+    gpt_6_astra = "gpt-6-astra"
 
     # Bigger models
     qwen3_next_80b_a3b_instruct = "Qwen/Qwen3-Next-80B-A3B-Instruct" # Try via API
@@ -257,26 +269,28 @@ if __name__ == "__main__":
     llama_3_70b = "meta-llama/Meta-Llama-3-70B-Instruct" # Too large
     qwen_3p6_35b = "Qwen/Qwen3.6-35B-A3B" # Works
 
+    gemma_4_26b = "google/gemma-4-26B-A4B-it"
+
     hypernova_60B = "MultiverseComputingCAI/Hypernova-60B-2605"
     nemotron_3_super_120b = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4" 
 
     # Remember to exclude .csv from dataset_path when annotating data
-    annotate_data(
-        dataset_path="datasets/triviaqa_filtered_samples/data1_size50",
-        prompt_name="binary_tree3_prompt1",
-        annotator_model_name=qwen3_next_80b_a3b_instruct_fp8,
-        generator_model_name=llama_3p1_8b,
-        verbose=True,
-        save_results=False
-    )
-    
-    #annotate_data_with_openai(
-    #    dataset_path="datasets/triviaqa_2/data.csv",
-    #    prompt_path="prompts/labeling_problem_p2.txt",
-    #    output_path="datasets/triviaqa_2",
-    #    model_name=gpt_5p4,
+    #annotate_data(
+    #    dataset_path="datasets/triviaqa_filtered_samples/data1_size50_reasoning_annotated",
+    #    prompt_name="binary_tree3_prompt3",
+    #    annotator_model_name=gemma_4_26b,
+    #    generator_model_name=llama_3p1_8b,
+    #    verbose=False,
     #    save_results=True
-    #) 
+    #)
+    
+    annotate_data_with_openai(
+        dataset_path="datasets/sanity_check/binarytree_sanity_check_missing_labels",
+        prompt_name="binary_tree3_prompt4",
+        annotator_model_name=gpt_5p6_sol,
+        generator_model_name=gemma_4_31b,
+        save_results=True
+    ) 
 
     #annotate_data_with_api(
     #    dataset_path="datasets/triviaqa_1/random_sample20.csv",

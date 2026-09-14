@@ -68,6 +68,11 @@ def main():
         {
             "name": "trivia_qa",
             "subset": "rc.nocontext"
+        },
+        {
+            "name": "rajpurkar/squad_v2",
+            "subset": None,
+            "split": "test"
         }
     ]
 
@@ -134,13 +139,14 @@ def main():
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_truthfulqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_triviaqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             
             # Testing folder
-            log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/squad_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+
             metrics_path = os.path.join(log_dir, "metrics.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
@@ -155,10 +161,10 @@ def main():
             # --- Dynamic Weight Loading ---
 
             # Change/delete: use same PCNet weights for each dataset
-            safe_ds_str = "truthful_qa"
+            #safe_ds_str = "truthful_qa"
             #safe_ds_str = "rajpurkar_squad_v2"
             #safe_ds_str = "trivia_qa"
-            #safe_ds_str = "coqa"
+            safe_ds_str = "coqa"
 
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
