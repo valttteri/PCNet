@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import gc
 import importlib
+import pandas as pd
 
 from guardrail import LLM_PC_Guardrail
 from experiment import HallucinationExperiment
@@ -14,8 +15,12 @@ from baselines import LatentMLPProbe
 # We import the dataloader module itself so we can forcefully reload it later
 import hf_dataloader
 
+from data_tools import load_custom_dataset
 from logger import Logger
 logs = Logger()
+
+BINARY_TREE_PROMPT = "binary_tree"
+LABELING_PROBLEM_PROMPT = "labeling_problem"
 
 # ==========================================
 # 1. Memory Management
@@ -31,7 +36,14 @@ def flush_memory():
 # ==========================================
 # 2. Main Evaluation Loop
 # ==========================================
-def main():
+def main(
+    use_custom_data:bool=False,
+    custom_train_data_path:str="",
+    custom_eval_data_path:str="",
+    weights_str:str="",
+    prompt_type:str="",
+    metrics_id:int=1
+):
     parser = argparse.ArgumentParser(description="Multi-Model Multi-Dataset Benchmark")
     parser.add_argument("config", help="Path of the JSON config file to use")
     parser.add_argument("seed", type=int, help="Random seed for reproducibility")
@@ -54,6 +66,7 @@ def main():
     # Limit max saples to 1000 to avoid computational overhead
     # Delete: changed max_samples
     max_samples = 1000
+    max_train_samples = 1000
     
     batch_size = config.get("batch_size", 8)
     
@@ -64,7 +77,23 @@ def main():
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa"}])
 
     # Change/delete: run with only specific datasets
+    #datasets = [
+    #    {
+    #        "name": "triviaqa_p2_prompt",
+    #        #"name": "trivia_qa",
+    #        "subset": "rc.nocontext"
+    #    }
+    #]
+
     datasets = [
+        {
+            "name": "coqa",
+            "subset": None
+        },
+        {
+            "name": "truthful_qa",
+            "subset": "generation"
+        },
         {
             "name": "trivia_qa",
             "subset": "rc.nocontext"
@@ -75,26 +104,6 @@ def main():
             "split": "test"
         }
     ]
-
-    #"datasets": [
-    #    {
-    #        "name": "coqa",
-    #        "subset": null
-    #    },
-    #    {
-    #        "name": "truthful_qa",
-    #        "subset": "generation"
-    #    },
-    #    {
-    #        "name": "trivia_qa",
-    #        "subset": "rc.nocontext"
-    #    },
-    #    {
-    #        "name": "rajpurkar/squad_v2",
-    #        "subset": null,
-    #        "split": "test"
-    #    }
-    #]
 
     master_metrics = {}
 
@@ -139,7 +148,7 @@ def main():
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_truthfulqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_triviaqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             
             # Testing folder
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
@@ -147,7 +156,15 @@ def main():
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
             #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
 
-            metrics_path = os.path.join(log_dir, "metrics.json")
+            # TriviaQA P2 prompt experiment metrics
+            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/squad_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+
+            log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/triviaqa_p2_test_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+
+            metrics_path = os.path.join(log_dir, f"metrics{metrics_id}.json")
 
             print("[main.py/main()] Metrics path:", metrics_path)
             print("Path exists", os.path.exists(metrics_path))
@@ -164,15 +181,15 @@ def main():
             #safe_ds_str = "truthful_qa"
             #safe_ds_str = "rajpurkar_squad_v2"
             #safe_ds_str = "trivia_qa"
-            safe_ds_str = "coqa"
+            #safe_ds_str = "coqa"
 
-            weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
+            weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, weights_str)
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
             pc_weight_path = os.path.join(weight_dir, pc_weight_filename)
             mlp_weight_path = os.path.join(weight_dir, "mlp_probe_best.pth") 
             
             if os.path.exists(pc_weight_path):
-                print(f"  📦 Loading FULL instances from {pc_weight_path}")
+                print(f"Loading FULL instances (PCNet weights) from {pc_weight_path}")
                 checkpoint = torch.load(pc_weight_path, map_location=device, weights_only=False)
                 guardrail.pc_prior = checkpoint['pc_prior'].to(device)
                 guardrail.projector = checkpoint['projector'].to(device)
@@ -187,18 +204,28 @@ def main():
                 print(f"  ⚠️ No trained MLP weights found. MLP baseline will be random.")
 
             # --- Load Data & Run ---
-            dataset = UnifiedDataLoader.load_test_data(
-                dataset_name=ds_name, 
-                subset=ds_subset, 
-                split=ds_split, 
-                max_samples=max_samples,
-                seed=args.seed
-            )
+            if use_custom_data:
+                dataset = load_custom_dataset(
+                    dataset_path=custom_eval_data_path,
+                    max_samples=max_samples,
+                    prompt_type=prompt_type,
+                    train=False,
+                    seed=args.seed
+                )
+            else:
+                dataset = UnifiedDataLoader.load_test_data(
+                    dataset_name=ds_name, 
+                    subset=ds_subset, 
+                    split=ds_split, 
+                    max_samples=max_samples,
+                    seed=args.seed
+                )
             
+            logs.info(f"Testing data size: {len(dataset)}")
             if not dataset:
                 print("  ⚠️ Dataset loading failed or empty. Skipping...")
                 continue
-            
+
             experiment = HallucinationExperiment(guardrail_model=guardrail, mlp_probe=mlp_probe, device=device)
             
             # =========================================================
@@ -206,15 +233,26 @@ def main():
             # =========================================================
             print("  🧩 Fetching RAW 'Wild Mixture' Embeddings for HaloScope Pipeline...")
             
+            # Delete/change: training data for calibration
             # Load BOTH true and fake data to create the variance mixture
-            train_true, train_fake = UnifiedDataLoader.load_train_data(
-                dataset_name=ds_name,
-                subset=ds_subset,
-                split=ds_split,
-                max_samples=max_train_samples, 
-                seed=args.seed
-            )
-            
+            if use_custom_data:
+                train_true, train_fake = load_custom_dataset(
+                    dataset_path=custom_train_data_path,
+                    max_samples=max_train_samples,
+                    prompt_type=prompt_type,
+                    train=True,
+                    seed=args.seed
+                )
+            else:
+                train_true, train_fake = UnifiedDataLoader.load_train_data(
+                    dataset_name=ds_name,
+                    subset=ds_subset,
+                    split=ds_split,
+                    max_samples=max_train_samples, 
+                    seed=args.seed
+                )
+            logs.info(f"Training data: train_true, train_fake entries {len(train_true)},{len(train_fake)}")
+
             # Combine into a "Wild" dataset (simulating 85% true, 15% fake in the wild)
             num_true = min(len(train_true), int(max_train_samples * 0.85))
             num_fake = min(len(train_fake), int(max_train_samples * 0.15))
@@ -249,10 +287,8 @@ def main():
             
             metrics = experiment.run_benchmark(dataset, dataset_name=ds_key, llm_name=llm_name)
             master_metrics[llm_name][ds_key] = metrics
-
-            #print("Main.py halting")
-            #return
             
+            # Change/delete: commented out result saving code
             os.makedirs(log_dir, exist_ok=True)
             with open(metrics_path, "w") as f:
                 json.dump(metrics, f, indent=4)
@@ -284,4 +320,17 @@ def main():
     print(f"\n🎉 ALL BENCHMARKS COMPLETE. Summary saved to {summary_path}")
 
 if __name__ == "__main__":
-    main()
+    # Names of different PCNet weights
+    #weights = ["truthful_qa", "rajpurkar_squad_v2", "trivia_qa", "coqa"]
+    weights = ["triviaqa_p2_test"]
+
+    for w in weights:
+        main(
+            use_custom_data=False,
+            #custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data4_size1000_train_annotated.csv",
+            custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data2_eval_deprecated.csv",
+            custom_eval_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data5_size1000_eval_annotated.csv",
+            weights_str=w,
+            prompt_type=LABELING_PROBLEM_PROMPT,
+            metrics_id=1
+        )

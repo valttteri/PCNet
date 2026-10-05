@@ -253,6 +253,7 @@ class HallucinationExperiment:
         print("📊 Comprehensive Benchmark Results")
         print("="*60)
         
+        # Right here (23.9)
         for name, scores in score_dict.items():
             # Exclude NaN samples (e.g. AutoFact on no-context datasets like TruthfulQA
             # deliberately returns NaN rather than biasing to 0.5 / min-score).
@@ -308,7 +309,10 @@ class HallucinationExperiment:
                 best_f1 = f1_scores[best_idx]
 
                 if best_idx < len(pr_thresholds):
+                    # Calibrated threshold
                     best_thresh = pr_thresholds[best_idx]
+                    # All NLL-scores equal or greater than the threshold are considered to
+                    # originate from hallucinated answers
                     y_pred = (scores_eval >= best_thresh).astype(int)
                 else:
                     y_pred = np.ones_like(y_true_eval)

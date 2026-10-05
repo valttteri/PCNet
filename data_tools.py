@@ -3,14 +3,17 @@ import json
 import boto3
 import torch
 import ast
+import random
 import pandas as pd
 import numpy as np
 from sklearn.metrics import cohen_kappa_score
+from sklearn.model_selection import train_test_split
 from transformers import BitsAndBytesConfig
 from huggingface_hub import model_info, InferenceClient
 from datasets import load_dataset
 from datetime import datetime
 from dotenv import load_dotenv
+from tabulate import tabulate
 
 from logger import Logger
 
@@ -22,6 +25,10 @@ BNB_CONFIG = BitsAndBytesConfig(
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
 )
+
+BINARY_TREE_PROMPT = "binary_tree"
+LABELING_PROBLEM_PROMPT = "labeling_problem"
+V4_HALLU_AUDIT_SHORT_PROMPT = "v4_hallu_audit_short"
 
 def annotation_label_metrics(dataset_path, col1_name, col2_name):
     # Compute raw agreement and Cohen's kappa score between two annotation lable columns
@@ -100,6 +107,9 @@ def create_data_subset(
     sample.to_csv(output_path, index=False)
     logs.info(f"Saved a data sample of shape {sample.shape} to {output_path}")
 
+def create_data_subset_14k():
+    output_path = "datasets/hallu_corpus_without_activations_v1"
+
 def format_answer_column(dataset_path:str):
     df = pd.read_csv(dataset_path)
 
@@ -115,18 +125,21 @@ def format_answer_column(dataset_path:str):
 
     df.to_csv(dataset_path, index=False)
 
-def count_column_values():
+def count_column_values(
+    dataset_path:str,
+    col_name:str
+):
     """
     Count how many times labels 0 and 1 were given (Prompt P2)
     """
-    df = pd.read_csv("datasets/triviaqa_2/data_gpt-5.4_labels.csv")
+    df = pd.read_csv(dataset_path)
 
-    zero_labels = df[df["gpt-5.4_promptP2_labels"] == 0]
-    one_labels = df[df["gpt-5.4_promptP2_labels"] == 1]
-    print(len(zero_labels))
-    print(len(one_labels))
+    zero_labels = df[df[col_name] == 0]
+    one_labels = df[df[col_name] == 1]
+    #print(len(zero_labels))
+    #print(len(one_labels))
 
-    print(df["gpt-5.4_promptP2_labels"].value_counts())
+    print(df[col_name].value_counts())
 
 def format_trivia_qa(df):
     """
@@ -144,13 +157,77 @@ def format_trivia_qa(df):
     ]
     
     # Step 1.
-    df["answer"] = df["answer"].apply(lambda x: x["aliases"])
+    df["answer"] = df["answer"].apply(lambda x: x["value"])
 
     # Step 2.
     df = df[triviaqa_cols]
     logs.info("(data_tools.py) Formatted trivia_qa sample")
 
     return df
+
+def format_14k():
+    dataset_dir = "datasets/hallu_corpus_without_activations_v1/"
+    output_path = os.path.join(dataset_dir, "data_samples")
+
+    df = pd.read_parquet(
+        f"{dataset_dir}/corpus_without_activations.parquet"
+    )
+    
+    models = [
+        "gemma-2-9b-it",
+        "llama-3-8b",
+        "mistral-7b-v0.3",
+    ]
+    datasets = ["hotpotqa", "triviaqa", "truthfulqa"]
+
+    print(f"\nData with only has_eos == True")
+    eos_tokens = df[df["has_eos"] == True].copy()
+
+    for m in models:
+        llm_subset = eos_tokens[eos_tokens["model"] == m].copy()
+        train_sets = []
+        test_sets = []
+
+        for ds in datasets:
+            data_subset = llm_subset[llm_subset["dataset"] == ds]
+            data_subset_name = f"{m}_{ds}_{len(data_subset)}"
+            print(f"model={m}, data={ds}, size={data_subset.shape}")
+
+
+            hallu = data_subset[data_subset["intermediate_p2"] == 1]
+            not_hallu = data_subset[data_subset["intermediate_p2"] == 0]
+
+            train_ds, test_ds = train_test_split(
+                data_subset,
+                test_size=0.2,
+                random_state=42,
+                stratify=data_subset["intermediate_p2"],  # replace "label" with your hallu/not_hallu column
+            )
+
+
+            train_sets.append(train_ds)
+            test_sets.append(test_ds)
+
+            #Save per-dataset train/test splits
+            train_ds.to_csv(f"{output_path}/{m}/{ds}_train.csv", index=False)
+            test_ds.to_csv(f"{output_path}/{m}/{ds}_test.csv", index=False)
+
+            print(f"{m}, {ds} train len={len(train_ds)}, test len={len(test_ds)}")
+
+        # Combine train portions across the three datasets, then shuffle
+        model_train = pd.concat(train_sets, ignore_index=True)
+        model_train = model_train.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        # Combine test portions across the three datasets, then shuffle
+        model_test = pd.concat(test_sets, ignore_index=True)
+        model_test = model_test.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        print(f"model={m}, train size={model_train.shape}, test size={model_test.shape}")
+
+        model_train.to_csv(f"{output_path}/{m}/combined_train.csv", index=False)
+        model_test.to_csv(f"{output_path}/{m}/combined_test.csv", index=False)
+
+    print(f"14k data subsets done.")
 
 def get_model_and_tokenizer_kwargs(model_name:str):
     # Tokenizer kwargs
@@ -313,6 +390,74 @@ def generate_bookkeeping(
     with open(f"{output_path}/data{identifier}_size{sample_size}_log.json", "w") as f:
         json.dump(log_entry, f)
 
+def concat_dfs():
+    df1 = pd.read_csv("datasets/sanity_check_full/binarytree_sanitycheck.csv")
+    df2 = pd.read_csv("datasets/sanity_check_full/binarytree_sanity_check_missing_labels_v5_annotated.csv")
+
+    df3 = pd.concat([df1, df2])
+
+    df3.to_csv("datasets/sanity_check_full/binarytree_sanitycheck2.csv", index=False)
+
+def load_custom_dataset(
+    dataset_path:str,
+    max_samples:int,
+    prompt_type:str,
+    train:bool=False,
+    seed:int=42,
+):
+    """
+    Load a custom dataset for training/evaluating PCNet instances.
+    The current implementation is hard coded for triviaqa data, and follows the authors' method (hf_dataloader.py)
+    """
+    random.seed(seed)
+    df = pd.read_csv(dataset_path)
+
+    if prompt_type == LABELING_PROBLEM_PROMPT:
+        truthful_subset = df[df["gpt-5.4_labeling_problem_p2"] == 0].reset_index(drop=True)
+        hallu_subset = df[df["gpt-5.4_labeling_problem_p2"] == 1].reset_index(drop=True)
+    
+    # Limit the sample size
+    limit = min(max_samples, min(len(truthful_subset), len(hallu_subset)))
+
+    truthful_entries = []
+    hallu_entries = []
+
+    for i in range(limit):
+        truthful_question = truthful_subset.loc[i, "question"]
+        truthful_answer = truthful_subset.loc[i, "gen_answer_meta-llama_Llama-3.1-8B-Instruct"]
+        
+        hallu_question = hallu_subset.loc[i, "question"]
+        hallu_answer = hallu_subset.loc[i, "gen_answer_meta-llama_Llama-3.1-8B-Instruct"]
+
+        truthful_entries.append(f"Question: {truthful_question}\nAnswer: {truthful_answer}")
+        hallu_entries.append(f"Question: {hallu_question}\nAnswer: {hallu_answer}")
+    
+    # Training condition: Return only QA-pairs
+    if train:
+        logs.info(
+            f"(data_tools.py) Returning training data, example:\nTruthful entry: {truthful_entries[0]}\nHallu entry: {hallu_entries[0]}"
+        )
+        return truthful_entries, hallu_entries
+
+    # Test condition: return QA-pair+label tuples
+    combined = [(text, 0) for text in truthful_entries] + [(text, 1) for text in hallu_entries]
+    random.shuffle(combined)
+    logs.info(
+        f"(data_tools.py) Returning testing data, example:\nEntry: {combined[0]}"
+    )
+    return combined
+
+def data_test():
+    df = pd.read_parquet(
+        "datasets/hallu_corpus_without_activations_v1/corpus_without_activations.parquet"
+    )
+
+    print(df.shape)
+    print(df["model"].value_counts())
+    print(df["dataset"].value_counts())
+
+    print(tabulate(df[:5], headers="keys", tablefmt="github"))
+
 if __name__ == "__main__":
     triviaqa_cols = [
         "question",
@@ -328,7 +473,10 @@ if __name__ == "__main__":
     gemma4_26b_prompt3 = "google/gemma-4-26B-A4B-it_binary_tree3_prompt3"
     qwen3_next_80b_prompt3 = "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8_binary_tree3_prompt3"
     gpt_6_astra = "gpt-6-astra_binary_tree3_prompt3"
-    gpt_5p6_sol = "gpt-5.6-sol_binary_tree3_prompt4"
+    gpt_5p6_sol_p5 = "gpt-5.6-sol_binary_tree3_prompt5"
+    gpt_5p6_sol_p4 = "gpt-5.6-sol_binary_tree3_prompt4"
+
+    #data_test()
 
     #format_answer_column(dataset_path="datasets/triviaqa_2/data.csv")
     #create_data_subset(
@@ -339,8 +487,22 @@ if __name__ == "__main__":
     #    format_answer_col=False
     #)
 
-    annotation_label_metrics(
-        dataset_path="datasets/sanity_check/data1_size70_annotated.csv",
-        col1_name=human,
-        col2_name=gpt_5p6_sol
-    )
+    #annotation_label_metrics(
+    #    dataset_path="datasets/sanity_check/data1_size70_annotated.csv",
+    #    col1_name=human,
+    #    col2_name=gpt_5p6_sol_p5
+    #)
+
+    #count_column_values(
+    #    dataset_path="datasets/triviaqa_filtered_samples/data5_size1000_annotated.csv",
+    #    col_name="gpt-5.4_labeling_problem_p2"
+    #)
+
+    format_14k()
+
+    #load_custom_dataset(
+    #    dataset_path="datasets/truthfulqa_p2_prompt_test_dataset/data2_size1000_eval_annotated.csv",
+    #    max_samples=500,
+    #    prompt_type=LABELING_PROBLEM_PROMPT,
+    #    train=False
+    #)
