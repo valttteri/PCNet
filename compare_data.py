@@ -197,11 +197,20 @@ def average_of_json_files(
 
     logs.info("Saved average values to json")
     
-
 def test():
     arr = [0.54624, 0.5453439999999999, 0.5460799999999999]
     mean = np.mean(arr)
     print(mean)
+
+def merge_json_files(file_paths, output_file):
+    merged_data = []
+    for path in file_paths:
+        with open(path, 'r') as file:
+            data = json.load(file)
+            merged_data.append(data)
+    with open(output_file, 'w') as outfile:
+        json.dump(merged_data, outfile)
+    logs.info(f"Saved concatenated JSON to {output_file}")
 
 if __name__ == "__main__":
     #main(
@@ -219,21 +228,34 @@ if __name__ == "__main__":
     #    df3_name="2_last_correction_pipeline_mc_logs/global_mc_summary_seed44.csv"
     #)
     
-    weights = "truthfulqa" # PCnet weights
-    datasets = ["trivia_qa", "rajpurkar_squad_v2"] # Eval datasets
-    model = "Qwen_Qwen3-4B-Instruct-2507" 
+    weights = ["coqa", "triviaqa", "truthfulqa", "squad"] # PCnet weights
+    datasets = ["triviaqa_p2_prompt"] # Eval datasets
+    model = "meta-llama_Llama-3.1-8B-Instruct" 
     seeds = [42, 43, 44]
 
-    for ds in datasets:
-        json_file_paths = [
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[0]}/{model}/{ds}/{seeds[0]}/metrics.json",
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[1]}/{model}/{ds}/{seeds[1]}/metrics.json",
-            f"all_logs/pcnet_detection_logs_{weights}_only/PCNet_Guardrail/{seeds[2]}/{model}/{ds}/{seeds[2]}/metrics.json"
-        ]
-        average_of_json_files(
-            file_paths=json_file_paths,
-            model_name=model,
-            dataset_name=ds,
-            output_path=f"comparisons/pcnet_exp1_main_py_results/{weights}_pcnet_weights"
-        )
-        
+    #json_filepaths = [
+    #    "all_logs/pcnet_triviaqa_prompt_p2/coqa_weights/PCNet_Guardrail/42/meta-llama_Llama-3.1-8B-Instruct/triviaqa_p2_prompt/42/metrics2.json",
+    #    "all_logs/pcnet_triviaqa_prompt_p2/squad_weights/PCNet_Guardrail/42/meta-llama_Llama-3.1-8B-Instruct/triviaqa_p2_prompt/42/metrics2.json",
+    #    "all_logs/pcnet_triviaqa_prompt_p2/truthfulqa_weights/PCNet_Guardrail/42/meta-llama_Llama-3.1-8B-Instruct/triviaqa_p2_prompt/42/metrics2.json",
+    #    "all_logs/pcnet_triviaqa_prompt_p2/triviaqa_weights/PCNet_Guardrail/42/meta-llama_Llama-3.1-8B-Instruct/triviaqa_p2_prompt/42/metrics2.json",
+    #]
+
+    #merge_json_files(
+    #    file_paths=json_filepaths,
+    #    output_file="all_logs/pcnet_triviaqa_prompt_p2/metrics2_total.json"
+    #)
+
+    for wt in weights: 
+        for ds in datasets:
+            json_file_paths = [
+                f"all_logs/pcnet_triviaqa_prompt_p2/{wt}_weights/PCNet_Guardrail/{seeds[0]}/{model}/triviaqa_p2_prompt/{seeds[0]}/metrics1.json",
+                f"all_logs/pcnet_triviaqa_prompt_p2/{wt}_weights/PCNet_Guardrail/{seeds[1]}/{model}/triviaqa_p2_prompt/{seeds[1]}/metrics1.json",
+                f"all_logs/pcnet_triviaqa_prompt_p2/{wt}_weights/PCNet_Guardrail/{seeds[2]}/{model}/triviaqa_p2_prompt/{seeds[2]}/metrics1.json"
+            ]
+            average_of_json_files(
+                file_paths=json_file_paths,
+                model_name=model,
+                dataset_name=ds,
+                output_path=f"comparisons/pcnet_triviaqa_p2_prompt_results/{wt}_pcnet_weights"
+            )
+     

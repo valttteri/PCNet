@@ -68,7 +68,7 @@ def generate_answers_with_api(
 
 def generate_answers(
     model_name:str,
-    dataset_path:str,
+    dataset_info:list,
     output_path:str,
     sample_size:int,
     identifier:int,
@@ -87,6 +87,7 @@ def generate_answers(
     device = "cuda"
 
     model_kwargs, chat_template_kwargs, tokenizer_kwargs = get_model_and_tokenizer_kwargs(model_name=model_name)
+    dataset_path, dataset_split = dataset_info[0], dataset_info[1] 
 
     # Load tokenizer and model
     if "gemma" in model_name:
@@ -114,7 +115,7 @@ def generate_answers(
     else:
         # Load dataset from huggingface and do preprocessing
         if "trivia_qa" in dataset_path:
-            dataset = load_dataset(dataset_path, "rc.nocontext", split=f"validation")
+            dataset = load_dataset(dataset_path, "rc.nocontext", split=dataset_split)
             dataset = dataset.to_pandas()
 
             dataset = format_trivia_qa(dataset)
@@ -227,11 +228,12 @@ if __name__ == "__main__":
     
 
     generate_answers(
-        model_name=gemma_4_31b,
-        dataset_path="trivia_qa",
-        output_path="datasets/sanity_check",
-        sample_size=70,
-        identifier=1,
+        model_name=llama_3p1_8b,
+        #dataset_info=["trivia_qa", "train[:10%]"],
+        dataset_info=["trivia_qa", "validation"],
+        output_path="datasets/triviaqa_filtered_samples",
+        sample_size=1000,
+        identifier=5,
         gguf_file=None,
         verbose=False,
         save_results=True

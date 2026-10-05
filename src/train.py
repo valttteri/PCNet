@@ -13,7 +13,12 @@ from guardrail import LLM_PC_Guardrail
 from baselines import LatentMLPProbe
 from hf_dataloader import UnifiedDataLoader
 
+from data_tools import load_custom_dataset
+
 ONLY_SAVE_DATASET = False
+
+BINARY_TREE_PROMPT = "binary_tree"
+LABELING_PROBLEM_PROMPT = "labeling_problem"
 
 # ==========================================
 # 1. Memory Management & Data Loading
@@ -52,18 +57,31 @@ def train_guardrail(config):
     pc_save_path = config.get("pc_save_path")
     mlp_save_path = config.get("mlp_save_path")
 
+    use_custom_data = config.get("use_custom_data")
+    custom_train_data_path = config.get("custom_train_data_path")
+    prompt_type = config.get("prompt_type")
+
     # Initialize Models
     print(f"🚀 Initializing Guardrail with {llm_name}...")
     guardrail = LLM_PC_Guardrail(llm_model_name=llm_name, pc_in_channels=pc_in_channels, device=device)
     mlp_probe = LatentMLPProbe(input_dim=pc_in_channels).to(device)
 
     # Load Data
-    true_texts, fake_texts = load_hf_training_data(
-        dataset_name=config.get("hf_dataset_name"), 
-        subset=config.get("hf_subset_name"), 
-        max_samples=config.get("max_train_samples", 1000),
-        seed=config.get("seed", 42)
-    )
+    if use_custom_data:
+        true_texts, fake_texts = load_custom_dataset(
+            dataset_path=custom_train_data_path,
+            max_samples=config.get("max_train_samples", 1000),
+            prompt_type=prompt_type,
+            train=True,
+            seed=config.get("seed", 42)
+        )
+    else:
+        true_texts, fake_texts = load_hf_training_data(
+            dataset_name=config.get("hf_dataset_name"), 
+            subset=config.get("hf_subset_name"), 
+            max_samples=config.get("max_train_samples", 1000),
+            seed=config.get("seed", 42)
+        )
     
     if ONLY_SAVE_DATASET:
         print(f"ONLY_SAVE_DATASET is {ONLY_SAVE_DATASET}, halted train_guardrail()")
@@ -178,7 +196,11 @@ def train_guardrail(config):
 # ==========================================
 # 3. Dynamic Multi-Model Looping
 # ==========================================
-def main():
+def main(
+    use_custom_data:bool=False,
+    custom_train_data_path:str="",
+    prompt_type:str=""
+):
     parser = argparse.ArgumentParser(description="Multi-Model Multi-Dataset Training")
     parser.add_argument("config", help="Path of the JSON config file to use")
     parser.add_argument("seed", type=int, help="Random seed for reproducibility")
@@ -194,6 +216,15 @@ def main():
     llm_models = config.get("llm_models", ["Qwen/Qwen2.5-0.5B"])
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa", "split": "data"}])
     algorithm = config.get("algorithm", "AttentionalPCNet_Guardrail")
+
+    # Number of datasets = number of training iterations
+    datasets = [
+        {
+            "name": "triviaqa_p2_prompt",
+            #"name": "trivia_qa",
+            "subset": "rc.nocontext"
+        }
+    ]
 
     if ONLY_SAVE_DATASET:
         # We take this dataset, and save the subset used by the paper to a csv file
@@ -218,7 +249,10 @@ def main():
             
             # Setup dynamic saving paths
             safe_llm_str = llm_name.replace("/", "_")
-            safe_ds_str = ds_name.replace("/", "_")
+            #safe_ds_str = ds_name.replace("/", "_")
+            
+            # Change/delete: modified safe_ds_str
+            safe_ds_str = "triviaqa_p2_test"
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             os.makedirs(weight_dir, exist_ok=True)
             pc_path = os.path.join(weight_dir, "pcnet_best.pth")
@@ -235,6 +269,10 @@ def main():
             current_config["pc_save_path"] = os.path.join(weight_dir, "pcnet_best.pth")
             current_config["mlp_save_path"] = os.path.join(weight_dir, "mlp_probe_best.pth")
             
+            current_config["use_custom_data"] = use_custom_data
+            current_config["custom_train_data_path"] = custom_train_data_path
+            current_config["prompt_type"] = prompt_type
+            
             # Run the training loop!
             train_guardrail(current_config)
             
@@ -245,4 +283,8 @@ def main():
 
 if __name__ == "__main__":
     ONLY_SAVE_DATASET = False
-    main()
+    main(
+        use_custom_data=True,
+        custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data4_size1000_train_annotated.csv",
+        prompt_type=LABELING_PROBLEM_PROMPT 
+    )
