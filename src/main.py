@@ -22,6 +22,8 @@ logs = Logger()
 BINARY_TREE_PROMPT = "binary_tree"
 LABELING_PROBLEM_PROMPT = "labeling_problem"
 
+BINARY_LABEL = "binary_label"
+
 # ==========================================
 # 1. Memory Management
 # ==========================================
@@ -41,7 +43,9 @@ def main(
     custom_train_data_path:str="",
     custom_eval_data_path:str="",
     weights_str:str="",
-    prompt_type:str="",
+    dataset_str:str="",
+    label_type:str="",
+    col_names:dict={},
     metrics_id:int=1
 ):
     parser = argparse.ArgumentParser(description="Multi-Model Multi-Dataset Benchmark")
@@ -76,34 +80,37 @@ def main(
     llm_models = config.get("llm_models", ["Qwen/Qwen2.5-0.5B"])
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa"}])
 
-    # Change/delete: run with only specific datasets
-    #datasets = [
-    #    {
-    #        "name": "triviaqa_p2_prompt",
-    #        #"name": "trivia_qa",
-    #        "subset": "rc.nocontext"
-    #    }
-    #]
+    # Alternative model name for paths
+    llm_path = config.get("model_path")
 
+    # Change/delete: run with only specific datasets.
     datasets = [
-        {
-            "name": "coqa",
-            "subset": None
-        },
-        {
-            "name": "truthful_qa",
-            "subset": "generation"
-        },
         {
             "name": "trivia_qa",
             "subset": "rc.nocontext"
-        },
-        {
-            "name": "rajpurkar/squad_v2",
-            "subset": None,
-            "split": "test"
         }
     ]
+
+    # Original
+    #datasets = [
+    #    {
+    #        "name": "coqa",
+    #        "subset": None
+    #    },
+    #    {
+    #        "name": "truthful_qa",
+    #        "subset": "generation"
+    #    },
+    #    {
+    #        "name": "trivia_qa",
+    #        "subset": "rc.nocontext"
+    #    },
+    #    {
+    #        "name": "rajpurkar/squad_v2",
+    #        "subset": None,
+    #        "split": "test"
+    #    }
+    #]
 
     master_metrics = {}
 
@@ -145,24 +152,10 @@ def main(
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
 
             # Change/delete: The folder where metrics are saved 
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_truthfulqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_squad_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_triviaqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_coqa_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            log_dir = os.path.join(f"all_logs/pcnet_14k/{weights_str}_weights", log_algo_folder, str(args.seed), safe_llm_str, dataset_str)
             
-            # Testing folder
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/squad_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_detection_logs_ztest/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-
-            # TriviaQA P2 prompt experiment metrics
-            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/truthfulqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/squad_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/triviaqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-            #log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/coqa_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
-
-            log_dir = os.path.join("all_logs/pcnet_triviaqa_prompt_p2/triviaqa_p2_test_weights", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str, str(args.seed))
+            # Test folder
+            #log_dir = os.path.join(f"all_logs/pcnet_detection_logs_ztest", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
 
             metrics_path = os.path.join(log_dir, f"metrics{metrics_id}.json")
 
@@ -183,13 +176,16 @@ def main(
             #safe_ds_str = "trivia_qa"
             #safe_ds_str = "coqa"
 
+            # Change/delete: custom weight_dir
+            algorithm = "PCNet_Guardrail_14k"
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, weights_str)
+            
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
             pc_weight_path = os.path.join(weight_dir, pc_weight_filename)
             mlp_weight_path = os.path.join(weight_dir, "mlp_probe_best.pth") 
             
             if os.path.exists(pc_weight_path):
-                print(f"Loading FULL instances (PCNet weights) from {pc_weight_path}")
+                print(f"Loading PCNet weights from {pc_weight_path}")
                 checkpoint = torch.load(pc_weight_path, map_location=device, weights_only=False)
                 guardrail.pc_prior = checkpoint['pc_prior'].to(device)
                 guardrail.projector = checkpoint['projector'].to(device)
@@ -208,7 +204,8 @@ def main(
                 dataset = load_custom_dataset(
                     dataset_path=custom_eval_data_path,
                     max_samples=max_samples,
-                    prompt_type=prompt_type,
+                    label_type=label_type,
+                    col_names=col_names,
                     train=False,
                     seed=args.seed
                 )
@@ -239,7 +236,8 @@ def main(
                 train_true, train_fake = load_custom_dataset(
                     dataset_path=custom_train_data_path,
                     max_samples=max_train_samples,
-                    prompt_type=prompt_type,
+                    label_type=label_type,
+                    col_names=col_names,
                     train=True,
                     seed=args.seed
                 )
@@ -321,16 +319,50 @@ def main(
 
 if __name__ == "__main__":
     # Names of different PCNet weights
-    #weights = ["truthful_qa", "rajpurkar_squad_v2", "trivia_qa", "coqa"]
-    weights = ["triviaqa_p2_test"]
+    gemma_2_9b_it = "gemma-2-9b-it"
+    llama_3_8b = "llama-3-8b"
+    mistral_7b_v03 = "mistral-7b-v0.3"
+    
+    # Which model we evaluate
+    model_name = mistral_7b_v03
+    # Which weights we use
+    weights = "truthfulqa"
+    # Datasets for evaluation
+    test_data = ["truthfulqa", "hotpotqa", "triviaqa", "combined"]
 
-    for w in weights:
+    col_names = {"q_col": "question", "a_col": "answer_text", "lbl_col": "intermediate_p2"}
+
+    for ds in test_data:
         main(
-            use_custom_data=False,
-            #custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data4_size1000_train_annotated.csv",
-            custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data2_eval_deprecated.csv",
-            custom_eval_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data5_size1000_eval_annotated.csv",
-            weights_str=w,
-            prompt_type=LABELING_PROBLEM_PROMPT,
+            use_custom_data=True,
+            custom_train_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_train.csv",
+            custom_eval_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_test.csv",
+            weights_str=weights,
+            dataset_str=ds,
+            label_type=BINARY_LABEL,
+            col_names=col_names,
             metrics_id=1
         )
+
+    """
+    main(
+        use_custom_data=False,
+        custom_train_data_path="",
+        custom_eval_data_path="",
+        weights_str="coqa",
+        dataset_str="",
+        label_type=BINARY_LABEL,
+        col_names="",
+        metrics_id=1
+    )
+    """
+
+#srun python src/main.py src/config/sup/llama3_1_8b.json 42 
+    """
+    dataset_path:str,
+    max_samples:int,
+    label_type:str,
+    col_names:dict,
+    train:bool=False,
+    seed:int=42,
+    """

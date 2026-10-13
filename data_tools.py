@@ -30,6 +30,8 @@ BINARY_TREE_PROMPT = "binary_tree"
 LABELING_PROBLEM_PROMPT = "labeling_problem"
 V4_HALLU_AUDIT_SHORT_PROMPT = "v4_hallu_audit_short"
 
+BINARY_LABEL = "binary_label"
+
 def annotation_label_metrics(dataset_path, col1_name, col2_name):
     # Compute raw agreement and Cohen's kappa score between two annotation lable columns
     logs.info("Computing metrics")
@@ -107,9 +109,6 @@ def create_data_subset(
     sample.to_csv(output_path, index=False)
     logs.info(f"Saved a data sample of shape {sample.shape} to {output_path}")
 
-def create_data_subset_14k():
-    output_path = "datasets/hallu_corpus_without_activations_v1"
-
 def format_answer_column(dataset_path:str):
     df = pd.read_csv(dataset_path)
 
@@ -125,6 +124,20 @@ def format_answer_column(dataset_path:str):
 
     df.to_csv(dataset_path, index=False)
 
+def dir_truthful_and_hallu_entries(
+    dir_path:str,
+    col_name:str
+):
+    print(f"Counting truthful and hallu entries in {dir_path}")
+
+    for entry in os.listdir(dir_path):
+        full_path = os.path.join(dir_path, entry)
+        
+        count_column_values(
+            dataset_path=full_path,
+            col_name=col_name
+        )
+
 def count_column_values(
     dataset_path:str,
     col_name:str
@@ -136,10 +149,11 @@ def count_column_values(
 
     zero_labels = df[df[col_name] == 0]
     one_labels = df[df[col_name] == 1]
-    #print(len(zero_labels))
-    #print(len(one_labels))
 
-    print(df[col_name].value_counts())
+    print(f"{dataset_path} values:")
+    print(f"Num truthful: {len(zero_labels)}")
+    print(f"Num hallu: {len(one_labels)}\n")
+    #print(df[col_name].value_counts())
 
 def format_trivia_qa(df):
     """
@@ -164,6 +178,75 @@ def format_trivia_qa(df):
     logs.info("(data_tools.py) Formatted trivia_qa sample")
 
     return df
+
+def small_combined_training_set_14k():
+    models = ["gemma-2-9b-it", "llama-3-8b", "mistral-7b-v0.3"]
+
+    for m in models:
+        data_path = f"datasets/hallu_corpus_without_activations_v1/data_samples/{m}/combined_train.csv"
+        output_path = f"datasets/hallu_corpus_without_activations_v1/data_samples/{m}/combined_train_small.csv"
+
+        df = pd.read_csv(data_path)
+
+        print(f"Model {m}, df shape: {len(df)}")
+
+        truthfulqa = df[df["dataset"] == "truthfulqa"]
+        triviaqa = df[df["dataset"] == "triviaqa"]
+        hotpotqa = df[df["dataset"] == "hotpotqa"]
+
+        truthfulqa_true = truthfulqa[truthfulqa["intermediate_p2"] == 0]
+        truthfulqa_hallu = truthfulqa[truthfulqa["intermediate_p2"] == 1]
+
+        triviaqa_true = triviaqa[triviaqa["intermediate_p2"] == 0]
+        triviaqa_hallu = triviaqa[triviaqa["intermediate_p2"] == 1]
+
+        hotpotqa_true = hotpotqa[hotpotqa["intermediate_p2"] == 0]
+        hotpotqa_hallu = hotpotqa[hotpotqa["intermediate_p2"] == 1]
+
+        # Limits
+        truthfulqa_limit = min(len(truthfulqa_true), len(truthfulqa_hallu))
+        triviaqa_limit = hotpotqa_limit = 250
+
+        # Samples
+        truthfulqa_true = truthfulqa_true.sample(n=truthfulqa_limit)
+        truthfulqa_hallu = truthfulqa_hallu.sample(n=truthfulqa_limit)
+
+        triviaqa_true = triviaqa_true.sample(n=triviaqa_limit)
+        triviaqa_hallu = triviaqa_hallu.sample(n=triviaqa_limit)
+
+        hotpotqa_true = hotpotqa_true.sample(n=hotpotqa_limit)
+        hotpotqa_hallu = hotpotqa_hallu.sample(n=hotpotqa_limit)
+
+        print("Truthfulqa portion:", len(truthfulqa))
+        print(f"Truthfulqa true and hallu: {len(truthfulqa_true)}, {len(truthfulqa_hallu)}\n")
+
+        print("Triviaqa portion:", len(triviaqa))
+        print(f"Triviaqa true and hallu: {len(triviaqa_true)}, {len(triviaqa_hallu)}\n")
+
+        print("Hotpotqa portion:", len(hotpotqa))
+        print(f"Hotpotqa true and hallu: {len(hotpotqa_true)}, {len(hotpotqa_hallu)}\n")
+
+        train_sets = [
+            truthfulqa_true,
+            truthfulqa_hallu,
+            triviaqa_true,
+            triviaqa_hallu,
+            hotpotqa_true,
+            hotpotqa_hallu
+        ]
+
+        model_train = pd.concat(train_sets, ignore_index=True)
+        model_train = model_train.sample(frac=1, random_state=42).reset_index(drop=True)
+
+        model_true = model_train[model_train["intermediate_p2"] == 0]
+        model_hallu = model_train[model_train["intermediate_p2"] == 1]
+
+        print(f"Combined size={model_train.shape}")
+        print(f"Combined true and hallu: {len(model_true)}, {len(model_hallu)}")
+
+        model_train.to_csv(output_path, index=False)
+
+    print("All done")
 
 def format_14k():
     dataset_dir = "datasets/hallu_corpus_without_activations_v1/"
@@ -201,9 +284,8 @@ def format_14k():
                 data_subset,
                 test_size=0.2,
                 random_state=42,
-                stratify=data_subset["intermediate_p2"],  # replace "label" with your hallu/not_hallu column
+                stratify=data_subset["intermediate_p2"]
             )
-
 
             train_sets.append(train_ds)
             test_sets.append(test_ds)
@@ -401,7 +483,8 @@ def concat_dfs():
 def load_custom_dataset(
     dataset_path:str,
     max_samples:int,
-    prompt_type:str,
+    label_type:str,
+    col_names:dict,
     train:bool=False,
     seed:int=42,
 ):
@@ -409,12 +492,16 @@ def load_custom_dataset(
     Load a custom dataset for training/evaluating PCNet instances.
     The current implementation is hard coded for triviaqa data, and follows the authors' method (hf_dataloader.py)
     """
+    logs.info(f"(data_tools.py) loading data from {dataset_path}")
     random.seed(seed)
     df = pd.read_csv(dataset_path)
 
-    if prompt_type == LABELING_PROBLEM_PROMPT:
-        truthful_subset = df[df["gpt-5.4_labeling_problem_p2"] == 0].reset_index(drop=True)
-        hallu_subset = df[df["gpt-5.4_labeling_problem_p2"] == 1].reset_index(drop=True)
+    q_col, a_col, lbl_col = col_names["q_col"], col_names["a_col"], col_names["lbl_col"]
+
+    if label_type == BINARY_LABEL:
+        truthful_subset = df[df[lbl_col] == 0].reset_index(drop=True)
+        hallu_subset = df[df[lbl_col] == 1].reset_index(drop=True)
+        logs.info(f"(data_tools.py) Size of truthful and hallu subsets: {len(truthful_subset)},{len(hallu_subset)}")
     
     # Limit the sample size
     limit = min(max_samples, min(len(truthful_subset), len(hallu_subset)))
@@ -423,11 +510,11 @@ def load_custom_dataset(
     hallu_entries = []
 
     for i in range(limit):
-        truthful_question = truthful_subset.loc[i, "question"]
-        truthful_answer = truthful_subset.loc[i, "gen_answer_meta-llama_Llama-3.1-8B-Instruct"]
+        truthful_question = truthful_subset.loc[i, q_col]
+        truthful_answer = truthful_subset.loc[i, a_col]
         
-        hallu_question = hallu_subset.loc[i, "question"]
-        hallu_answer = hallu_subset.loc[i, "gen_answer_meta-llama_Llama-3.1-8B-Instruct"]
+        hallu_question = hallu_subset.loc[i, q_col]
+        hallu_answer = hallu_subset.loc[i, a_col]
 
         truthful_entries.append(f"Question: {truthful_question}\nAnswer: {truthful_answer}")
         hallu_entries.append(f"Question: {hallu_question}\nAnswer: {hallu_answer}")
@@ -437,6 +524,7 @@ def load_custom_dataset(
         logs.info(
             f"(data_tools.py) Returning training data, example:\nTruthful entry: {truthful_entries[0]}\nHallu entry: {hallu_entries[0]}"
         )
+        logs.info(f"(data_tools.py) Size of truthful, hallu entries: {len(truthful_entries)}, {len(hallu_entries)}")
         return truthful_entries, hallu_entries
 
     # Test condition: return QA-pair+label tuples
@@ -498,7 +586,20 @@ if __name__ == "__main__":
     #    col_name="gpt-5.4_labeling_problem_p2"
     #)
 
-    format_14k()
+    dir_truthful_and_hallu_entries(
+        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/gemma-2-9b-it",
+        col_name="intermediate_p2"
+    )
+    dir_truthful_and_hallu_entries(
+        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/llama-3-8b",
+        col_name="intermediate_p2"
+    )
+    dir_truthful_and_hallu_entries(
+        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/mistral-7b-v0.3",
+        col_name="intermediate_p2"
+    )
+
+    #test_14k()
 
     #load_custom_dataset(
     #    dataset_path="datasets/truthfulqa_p2_prompt_test_dataset/data2_size1000_eval_annotated.csv",
