@@ -5,9 +5,9 @@
     
     "llm_models": [
         "mistralai/Mistral-7B-Instruct-v0.3"
-
     ],
-    
+    "model_path": "mistral-7b-v0.3",
+
     "datasets": [
         {
             "name": "coqa",

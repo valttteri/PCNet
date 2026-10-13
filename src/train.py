@@ -14,11 +14,15 @@ from baselines import LatentMLPProbe
 from hf_dataloader import UnifiedDataLoader
 
 from data_tools import load_custom_dataset
+from logger import Logger
 
 ONLY_SAVE_DATASET = False
 
 BINARY_TREE_PROMPT = "binary_tree"
 LABELING_PROBLEM_PROMPT = "labeling_problem"
+BINARY_LABEL = "binary_label"
+
+logs = Logger()
 
 # ==========================================
 # 1. Memory Management & Data Loading
@@ -59,7 +63,8 @@ def train_guardrail(config):
 
     use_custom_data = config.get("use_custom_data")
     custom_train_data_path = config.get("custom_train_data_path")
-    prompt_type = config.get("prompt_type")
+    label_type = config.get("label_type")
+    col_names = config.get("col_names")
 
     # Initialize Models
     print(f"🚀 Initializing Guardrail with {llm_name}...")
@@ -71,7 +76,8 @@ def train_guardrail(config):
         true_texts, fake_texts = load_custom_dataset(
             dataset_path=custom_train_data_path,
             max_samples=config.get("max_train_samples", 1000),
-            prompt_type=prompt_type,
+            label_type=label_type,
+            col_names=col_names,
             train=True,
             seed=config.get("seed", 42)
         )
@@ -83,6 +89,14 @@ def train_guardrail(config):
             seed=config.get("seed", 42)
         )
     
+    # Make sure the data size is divisible by the batch size
+    remainder = len(true_texts) % batch_size
+    if remainder != 0:
+        true_texts = true_texts[remainder:]
+        fake_texts = fake_texts[remainder:]
+
+    logs.info(f"Divisible by batch size: {len(true_texts) % batch_size == 0}, {len(fake_texts) % batch_size == 0}")
+
     if ONLY_SAVE_DATASET:
         print(f"ONLY_SAVE_DATASET is {ONLY_SAVE_DATASET}, halted train_guardrail()")
         # load_hf_training_data saved the dataset to a csv file, no need to proceed further
@@ -199,7 +213,9 @@ def train_guardrail(config):
 def main(
     use_custom_data:bool=False,
     custom_train_data_path:str="",
-    prompt_type:str=""
+    label_type:str="",
+    col_names:dict={},
+    dataset_name:str=""
 ):
     parser = argparse.ArgumentParser(description="Multi-Model Multi-Dataset Training")
     parser.add_argument("config", help="Path of the JSON config file to use")
@@ -215,16 +231,18 @@ def main(
 
     llm_models = config.get("llm_models", ["Qwen/Qwen2.5-0.5B"])
     datasets = config.get("datasets", [{"name": "pminervini/HaluEval", "subset": "qa", "split": "data"}])
+    
+    # Change/delete: modified algorithm for 14k data
     algorithm = config.get("algorithm", "AttentionalPCNet_Guardrail")
+    #algorithm = "PCNet_Guardrail_14k"
 
-    # Number of datasets = number of training iterations
-    datasets = [
-        {
-            "name": "triviaqa_p2_prompt",
-            #"name": "trivia_qa",
-            "subset": "rc.nocontext"
-        }
-    ]
+    # Number of datasets = number of training iterations (we need only 1)
+    #datasets = [
+    #    {
+    #        "name": dataset_name,
+    #        "subset": "rc.nocontext"
+    #    }
+    #]
 
     if ONLY_SAVE_DATASET:
         # We take this dataset, and save the subset used by the paper to a csv file
@@ -244,15 +262,15 @@ def main(
         for ds_info in datasets:
             ds_name = ds_info["name"]
             ds_subset = ds_info.get("subset", "qa")
-            
+    
             print(f"\n📚 TRAINING ON DATASET: {ds_name} (Subset: {ds_subset})")
             
             # Setup dynamic saving paths
             safe_llm_str = llm_name.replace("/", "_")
-            #safe_ds_str = ds_name.replace("/", "_")
+            safe_ds_str = ds_name.replace("/", "_")
             
             # Change/delete: modified safe_ds_str
-            safe_ds_str = "triviaqa_p2_test"
+            #safe_ds_str = "triviaqa_p2_test"
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, safe_ds_str)
             os.makedirs(weight_dir, exist_ok=True)
             pc_path = os.path.join(weight_dir, "pcnet_best.pth")
@@ -271,7 +289,9 @@ def main(
             
             current_config["use_custom_data"] = use_custom_data
             current_config["custom_train_data_path"] = custom_train_data_path
-            current_config["prompt_type"] = prompt_type
+            current_config["label_type"] = label_type
+            current_config["max_train_samples"] = 1000
+            current_config["col_names"] = col_names
             
             # Run the training loop!
             train_guardrail(current_config)
@@ -282,9 +302,57 @@ def main(
     print("\n🎉 ALL TRAINING COMPLETE.")
 
 if __name__ == "__main__":
+    # parse arguments
+    parser = argparse.ArgumentParser(description="Multi-Model Multi-Dataset Training")
+    parser.add_argument("config", help="Path of the JSON config file to use")
+    parser.add_argument("seed", type=int, help="Random seed for reproducibility")
+    args = parser.parse_args()
+    
+    with open(args.config, "r") as f:
+        config = json.load(f)
+    
+    # model name for the dataset path
+    model_name = config.get("model_path")
+
     ONLY_SAVE_DATASET = False
+    col_names = {"q_col": "question", "a_col": "answer_text", "lbl_col": "intermediate_p2"}
+    
+    gemma_2_9b_it = "gemma-2-9b-it"
+    llama_3_8b = "llama-3-8b"
+    mistral_7b_v03 = "mistral-7b-v0.3"
+
+    #model_name = gemma_2_9b_it
+
+    datasets = [
+        "hotpotqa",
+        "triviaqa",
+        "truthfulqa",
+        "combined_small"
+    ]
+    train_data = [
+        f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/hotpotqa_train.csv",
+        f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/triviaqa_train.csv",
+        f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/truthfulqa_train.csv",
+        f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/combined_train_small.csv"
+    ]
+
+    """
+    for (ds_name, ds_path) in zip(datasets, train_data):
+        main(
+            use_custom_data=True,
+            custom_train_data_path=ds_path,
+            label_type=BINARY_LABEL,
+            col_names=col_names,
+            dataset_name=ds_name 
+        )
+    """
+
     main(
-        use_custom_data=True,
-        custom_train_data_path="datasets/truthfulqa_p2_prompt_test_dataset/data4_size1000_train_annotated.csv",
-        prompt_type=LABELING_PROBLEM_PROMPT 
+        use_custom_data=False,
+        custom_train_data_path="",
+        label_type="",
+        col_names="",
+        dataset_name="" 
     )
+
+    #combined = f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/combined_train.csv",
