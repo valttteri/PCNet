@@ -121,16 +121,22 @@ def generate_answers(
             dataset = format_trivia_qa(dataset)
 
     dataset = dataset.sample(frac=1).reset_index(drop=True)
-    questions = dataset["question"]
 
     logs.info(f"Dataset length: {dataset.shape}")
+    
+    # Remove duplicate QA-pairs
+    current_sanity_check_data = pd.read_csv("datasets/sanity_check/sanity_check_v1.csv")
+    existing_question_ids = current_sanity_check_data["question_id"]
+    dataset = dataset[~dataset["question_id"].isin(existing_question_ids)]
+    questions = dataset["question"]
+
+    logs.info(f"Dataset length after removing duplicates: {dataset.shape}")
 
     # Arrays for answers, and 1/0 values indicating if the answers were completed
     answers, is_completed = [], []
 
     # Generate an answer for each question
     for i, q in enumerate(questions):
-        #logs.info(f"Iteration number {i+1}")
         if sum(is_completed) == sample_size:
             logs.info(f"{sum(is_completed)} complete answers generated after {len(is_completed)} iterations")
             break
@@ -190,21 +196,22 @@ def generate_answers(
 
         safe_model_name = model_name.replace("/", "_")
         
-        data_subset.loc[:, f"gen_answer_{safe_model_name}"] = answers
+        data_subset.loc[:, "generated_answer"] = answers
+        data_subset.loc[:, "generator_model"] = model_name
         data_subset.loc[:, "is_complete"] = is_completed
         
         # Drop all rows that contain an incomplete answer
         data_subset = data_subset[data_subset["is_complete"] == 1]
         data_subset = data_subset.drop(columns=["is_complete"])
 
-        path_to_results = f"{output_path}/data{identifier}_size{sample_size}.csv"
+        path_to_results = f"{output_path}/data{identifier}_size{sample_size}"
 
         logs.info(f"Dataset length after filtering: {len(data_subset)}")
 
-        data_subset.to_csv(f"{output_path}/data{identifier}_size{sample_size}.csv", index=False)    
+        data_subset.to_csv(f"{path_to_results}.csv", index=False)    
         generate_bookkeeping(
             model_name=model_name,
-            output_path=output_path,
+            output_path=path_to_results,
             sample_size=sample_size,
             identifier=identifier
         )
@@ -228,12 +235,12 @@ if __name__ == "__main__":
     
 
     generate_answers(
-        model_name=llama_3p1_8b,
+        model_name=gemma_4_31b,
         #dataset_info=["trivia_qa", "train[:10%]"],
         dataset_info=["trivia_qa", "validation"],
-        output_path="datasets/triviaqa_filtered_samples",
+        output_path="datasets/sanity_check",
         sample_size=1000,
-        identifier=5,
+        identifier=2,
         gguf_file=None,
         verbose=False,
         save_results=True

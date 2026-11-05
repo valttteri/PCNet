@@ -87,7 +87,7 @@ def main(
     datasets = [
         {
             "name": "trivia_qa",
-            "subset": "rc.nocontext"
+            "subset": "rc.nocontext",
         }
     ]
 
@@ -152,8 +152,9 @@ def main(
             #log_dir = os.path.join("logs", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
 
             # Change/delete: The folder where metrics are saved 
-            log_dir = os.path.join(f"all_logs/pcnet_14k/{weights_str}_weights", log_algo_folder, str(args.seed), safe_llm_str, dataset_str)
-            
+            #log_dir = os.path.join(f"all_logs/pcnet_14k/{weights_str}_weights", log_algo_folder, str(args.seed), safe_llm_str, dataset_str)
+            log_dir = os.path.join(f"all_logs/pcnet_detection_{weights_str}_only", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
+                        
             # Test folder
             #log_dir = os.path.join(f"all_logs/pcnet_detection_logs_ztest", log_algo_folder, str(args.seed), safe_llm_str, safe_ds_str)
 
@@ -176,8 +177,8 @@ def main(
             #safe_ds_str = "trivia_qa"
             #safe_ds_str = "coqa"
 
-            # Change/delete: custom weight_dir
-            algorithm = "PCNet_Guardrail_14k"
+            # Change/delete: custom weight_dir and algorithm
+            #algorithm = "PCNet_Guardrail_14k"
             weight_dir = os.path.join("checkpoints", algorithm, str(args.seed), safe_llm_str, weights_str)
             
             pc_weight_filename = "pcnet_best_unsup.pth" if is_unsup else "pcnet_best.pth"
@@ -321,41 +322,46 @@ if __name__ == "__main__":
     # Names of different PCNet weights
     gemma_2_9b_it = "gemma-2-9b-it"
     llama_3_8b = "llama-3-8b"
-    mistral_7b_v03 = "mistral-7b-v0.3"
+    mistral_7b_v03 = "mistral-7b-v0.3" # Instruct
     
     # Which model we evaluate
-    model_name = mistral_7b_v03
+    model_name = gemma_2_9b_it
     # Which weights we use
-    weights = "truthfulqa"
+    #weights = ["combined", "hotpotqa", "triviaqa", "truthfulqa"]
+    weights = ["rajpurkar_squad_v2"]
     # Datasets for evaluation
-    test_data = ["truthfulqa", "hotpotqa", "triviaqa", "combined"]
+    #eval_datasets = ["combined", "hotpotqa", "triviaqa", "truthfulqa"]
+    eval_datasets = ["trivia_qa"]
 
     col_names = {"q_col": "question", "a_col": "answer_text", "lbl_col": "intermediate_p2"}
 
-    for ds in test_data:
+    """
+    for wt in weights:
+        for ds in eval_datasets:
+            main(
+                use_custom_data=False,
+                custom_train_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_train.csv",
+                custom_eval_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_test.csv",
+                weights_str=wt,
+                dataset_str=ds,
+                label_type=BINARY_LABEL,
+                col_names=col_names,
+                metrics_id=1
+            )
+    """
+
+    for wt in weights:    
         main(
-            use_custom_data=True,
-            custom_train_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_train.csv",
-            custom_eval_data_path=f"datasets/hallu_corpus_without_activations_v1/data_samples/{model_name}/{ds}_test.csv",
-            weights_str=weights,
-            dataset_str=ds,
+            use_custom_data=False,
+            custom_train_data_path="",
+            custom_eval_data_path="",
+            weights_str=wt,
+            dataset_str="",
             label_type=BINARY_LABEL,
-            col_names=col_names,
+            col_names="",
             metrics_id=1
         )
-
-    """
-    main(
-        use_custom_data=False,
-        custom_train_data_path="",
-        custom_eval_data_path="",
-        weights_str="coqa",
-        dataset_str="",
-        label_type=BINARY_LABEL,
-        col_names="",
-        metrics_id=1
-    )
-    """
+    
 
 #srun python src/main.py src/config/sup/llama3_1_8b.json 42 
     """
