@@ -1,3 +1,5 @@
+# In a CPU node, comment out the following: boto3, torch, BNB_CONFIG
+
 import os
 import json
 import boto3
@@ -160,21 +162,24 @@ def format_trivia_qa(df):
     Function for preprocessing a triviaqa data sample
 
     Pipeline:
-    1. Format answer-column from a weird dict to an array
+    1. Format answer-column from a dictionary to an array
     2. Remove unnecessary columns
     """
     triviaqa_cols = [
         "question",
         "question_id",
+        "dataset",
         "question_source",
         "answer",
     ]
     
     # Step 1.
-    df["answer"] = df["answer"].apply(lambda x: x["value"])
+    df["answer"] = df["answer"].apply(lambda x: x["aliases"])
+    df["dataset"] = ["triviaqa" for i in range(len(df))]
 
     # Step 2.
     df = df[triviaqa_cols]
+
     logs.info("(data_tools.py) Formatted trivia_qa sample")
 
     return df
@@ -250,7 +255,7 @@ def small_combined_training_set_14k():
 
 def format_14k():
     dataset_dir = "datasets/hallu_corpus_without_activations_v1/"
-    output_path = os.path.join(dataset_dir, "data_samples")
+    output_path = os.path.join(dataset_dir, "data_samples/all_entries")
 
     df = pd.read_parquet(
         f"{dataset_dir}/corpus_without_activations.parquet"
@@ -263,11 +268,12 @@ def format_14k():
     ]
     datasets = ["hotpotqa", "triviaqa", "truthfulqa"]
 
-    print(f"\nData with only has_eos == True")
-    eos_tokens = df[df["has_eos"] == True].copy()
+    #print(f"\nData with only has_eos == True")
+    #eos_tokens = df[df["has_eos"] == True].copy()
 
     for m in models:
-        llm_subset = eos_tokens[eos_tokens["model"] == m].copy()
+        #llm_subset = eos_tokens[eos_tokens["model"] == m].copy()
+        llm_subset = df[df["model"] == m].copy()
         train_sets = []
         test_sets = []
 
@@ -372,22 +378,6 @@ def get_model_generation_kwargs(
     tokenizer=None,
     annotate:bool=False
 ):
-    known_models = [
-        "Qwen/Qwen3.6-35B-A3B",
-        "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
-        "MultiverseComputingCAI/Hypernova-60B-2605",
-        "meta-llama/Llama-3.1-8B-Instruct",
-        "meta-llama/Llama-3.2-1B-Instruct",
-        "google/gemma-4-31B-it",
-        "Qwen/Qwen3-Next-80B-A3B-Instruct",
-        "meta-llama/Meta-Llama-3-70B-Instruct",
-        "Qwen/Qwen3-Next-80B-A3B-Instruct-FP8",
-        "google/gemma-4-26B-A4B-it"
-    ]
-        
-    if model_name not in known_models:
-        logs.error(f"{model_name} is unknown.")
-        return None
     
     max_new_tokens = 150
     if annotate:
@@ -432,7 +422,7 @@ def get_model_generation_kwargs(
         "do_sample": True,
         "temperature": 0.7,
         "repetition_penalty": 1.1,
-        "pad_token_id": tokenizer.eos_token_id # Comment out for gemma models
+        "pad_token_id": tokenizer.eos_token_id
     }
 
 def generate_bookkeeping(
@@ -456,7 +446,7 @@ def generate_bookkeeping(
     dataset_info = {
         "name": "trivia_qa",
         "subset": "rc.nocontext",
-        "split": f"validation"
+        "split": "validation"
     }
 
     log_entry = {
@@ -469,7 +459,7 @@ def generate_bookkeeping(
         "prompt": prompt
     }
 
-    with open(f"{output_path}/data{identifier}_size{sample_size}_log.json", "w") as f:
+    with open(f"{output_path}_log.json", "w") as f:
         json.dump(log_entry, f)
 
 def concat_dfs():
@@ -536,15 +526,30 @@ def load_custom_dataset(
     return combined
 
 def data_test():
-    df = pd.read_parquet(
-        "datasets/hallu_corpus_without_activations_v1/corpus_without_activations.parquet"
+    df = pd.read_csv(
+        "datasets/sanity_check/data2_size1000.csv"
     )
 
     print(df.shape)
-    print(df["model"].value_counts())
-    print(df["dataset"].value_counts())
+    return
+    is_ref = df[:500]
+    no_ref = df[500:]
 
-    print(tabulate(df[:5], headers="keys", tablefmt="github"))
+    no_ref["answer"] = [[] for i in range(len(no_ref))]
+    no_ref = no_ref.reset_index(drop=True)
+
+    no_ref.to_csv("datasets/sanity_check/no_ref.csv", index=False)
+
+    is_ref = is_ref.reset_index(drop=True)
+
+    is_ref.to_csv("datasets/sanity_check/is_ref.csv", index=False)
+
+    print(is_ref.shape)
+    print(no_ref.shape)
+
+    #no_ref = no_ref.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    print(tabulate(is_ref[:5], headers="keys", tablefmt="github"))
 
 if __name__ == "__main__":
     triviaqa_cols = [
@@ -585,20 +590,6 @@ if __name__ == "__main__":
     #    dataset_path="datasets/triviaqa_filtered_samples/data5_size1000_annotated.csv",
     #    col_name="gpt-5.4_labeling_problem_p2"
     #)
-
-    dir_truthful_and_hallu_entries(
-        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/gemma-2-9b-it",
-        col_name="intermediate_p2"
-    )
-    dir_truthful_and_hallu_entries(
-        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/llama-3-8b",
-        col_name="intermediate_p2"
-    )
-    dir_truthful_and_hallu_entries(
-        dir_path="datasets/hallu_corpus_without_activations_v1/data_samples/mistral-7b-v0.3",
-        col_name="intermediate_p2"
-    )
-
     #test_14k()
 
     #load_custom_dataset(
@@ -607,3 +598,5 @@ if __name__ == "__main__":
     #    prompt_type=LABELING_PROBLEM_PROMPT,
     #    train=False
     #)
+
+    data_test()

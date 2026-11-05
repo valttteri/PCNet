@@ -36,6 +36,9 @@ BNB_CONFIG = BitsAndBytesConfig(
 BINARY_TREE_PROMPT = "binary_tree"
 LABELING_PROBLEM_PROMPT = "labeling_problem"
 
+BINARY_LABEL = "binary_label"
+LABELING_PROBLEM_LABEL = "labeling_problem_label"
+
 """
 Functions for annotating models answers.
 """
@@ -192,13 +195,16 @@ def annotate_data_with_openai(
     dataset_path:str,
     prompt_name:str,
     annotator_model_name:str,
-    generator_model_name:str,
-    prompt_type:str,
+    label_type:str,
     identifier:int=None,
     save_results=False,
 ):
     client = OpenAI()
     dataset = pd.read_csv(f"{dataset_path}.csv")
+
+    # Take the relevant subset for annotation
+    dataset = dataset[dataset["human_label"].isin(["pos1", "pos2", "pos3", "pos4"])]
+    dataset = dataset.reset_index(drop=True)
 
     prompt_path = f"prompts/{prompt_name}.txt"
     with open(prompt_path, "r") as f:
@@ -206,18 +212,17 @@ def annotate_data_with_openai(
 
     questions = dataset["question"]
     ref_answers = dataset["answer"]
+    human_labels = dataset["human_label"]
 
-    #Example col name: gen_answer_meta-llama_Llama-3.1-8B-Instruct
-    safe_gen_model_name = generator_model_name.replace("/", "_")
-    gen_answer_col_name = f"gen_answer_{safe_gen_model_name}"
-    model_answers = dataset[gen_answer_col_name]
+    # Get the generated answers
+    generated_answers = dataset["generated_answer"]
 
     labels = []
     confidences = []
     total_tokens = 0
 
     # Create a chatbot using ChatCompletion.create() function
-    for i, (q, r, m) in enumerate(zip(questions, ref_answers, model_answers)):
+    for i, (q, r, m) in enumerate(zip(questions, ref_answers, generated_answers)):
 
         user_input = f"Question: {q} ### Reference answer: {r} ### Model answer: {m}"
         completion = client.chat.completions.create(
@@ -234,34 +239,47 @@ def annotate_data_with_openai(
         total_tokens += tokens_spent
 
         # Extract response data based on the prompt type
-        if prompt_type == LABELING_PROBLEM_PROMPT:
+        if label_type == LABELING_PROBLEM_LABEL:
             response_dict = ast.literal_eval(response) # Label and confidence decided by model, as Python dict
             labels.append(response_dict["label"])
             confidences.append(response_dict["confidence"])        
 
-        if prompt_type == BINARY_TREE_PROMPT:
+        if label_type == BINARY_LABEL:
             labels.append(response)
 
-        if i % 5 == 0:
+        if i % 5 == 0 and i > 0:
             logs.info(f"{i}/{len(dataset)} QA-pairs annotated. Cost so far: {total_tokens} tokens.")
 
-    if dataset_path.endswith("annotated"):
-        result_path = f"{dataset_path}.csv"
-    else:
-        result_path = f"{dataset_path}_annotated.csv"
+        response = ast.literal_eval(response)
+        logs.info(f"Question number {i+1}:")
+        print("##########")
+        print("Question:", q)
+        print("##########")
+        print(f"Human label:", human_labels[i])
+        print("##########")
+        print(f"Model reasoning:", response["reasoning"])
+        print(f"Model label:", response["label"])
+        print("\n")
+
 
     if save_results:
         annotated_dataset = dataset.copy()
 
         # Define the annotation label column name
-        col_name = f"{annotator_model_name}_{prompt_name}"
+        annotation_col_name = "model_label"
         if identifier is not None:
-            col_name = f"{annotator_model_name}_{prompt_name}_v{identifier}"
+            annotation_col_name = f"model_label_v{identifier}"
 
-        annotated_dataset[col_name] = labels
-        if prompt_type == LABELING_PROBLEM_PROMPT:
+        # Add new columns to the dataframe
+        annotated_dataset[annotation_col_name] = labels
+        annotated_dataset["annotator_model"] = [annotator_model_name for i in range(len(labels))]
+        annotated_dataset["prompt_name"] = [prompt_name for i in range(len(labels))]
+        
+        if label_type == LABELING_PROBLEM_LABEL:
             # For the labeling promblem prompts, include the confidences
             annotated_dataset[f"{annotator_model_name}_confs"] = confidences
+
+        result_path = f"{dataset_path}.csv"
 
         annotated_dataset.to_csv(result_path, index=False)
         logs.info(f"Results saved to: {result_path}")
@@ -301,22 +319,13 @@ if __name__ == "__main__":
     #    save_results=True
     #)
     
-    #annotate_data_with_openai(
-    #    dataset_path="datasets/sanity_check/data1_size70_annotated",
-    #    prompt_name="binary_tree3_prompt5",
-    #    identifier=2,
-    #    annotator_model_name=gpt_5p6_sol,
-    #    generator_model_name=gemma_4_31b,
-    #    save_results=True
-    #) 
-
     annotate_data_with_openai(
-        dataset_path="datasets/triviaqa_filtered_samples/data5_size1000",
-        prompt_name="labeling_problem_p2",
-        annotator_model_name=gpt_5p4,
-        generator_model_name=llama_3p1_8b,
-        prompt_type=LABELING_PROBLEM_PROMPT,
-        save_results=True
+        dataset_path="datasets/sanity_check/test_batches/sanity_check_pos1234",
+        prompt_name="binary_tree3_prompt5",
+        annotator_model_name=gpt_5p6_sol,
+        label_type=BINARY_LABEL,
+        identifier=None,
+        save_results=False
     ) 
 
     #annotate_data_with_api(
